@@ -288,3 +288,103 @@ kbd.k.down{background:var(--accent);border-color:var(--accent);color:#1b2a30}
 #dead.active .payout{animation-delay:.1s}#dead.active .death-actions{animation-delay:.2s}
 @keyframes deathIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){#dead.active .stats,#dead.active .payout,#dead.active .death-actions{animation:none}}
+
+/* ---- round 7: tour cards that sit beside panels, and tutorial panels that resize per device ---- */
+/* the card always draws above the red outline (it used to share a layer, so the outline showed through) */
+.coach{z-index:8;max-width:calc(100vw - 20px)}
+.coach-ring{z-index:7}
+/* abilities + settings-slider steps: JS sets left/top/width; the card is opaque so nothing glows through it */
+.coach.fit{transform:none!important;bottom:auto!important}
+.coach.fit .coach-card{background:rgba(8,18,28,.98);backdrop-filter:none;-webkit-backdrop-filter:none}
+.coach.compact .coach-card{padding:11px 15px 9px}
+.coach.compact .coach-tag{font-size:9px;margin-bottom:5px}
+.coach.bottom.compact .coach-title{font-size:16px;margin-bottom:4px}
+.coach.bottom.compact .coach-text{font-size:11.5px;line-height:1.5}
+.coach.compact .coach-actions{margin-top:8px;gap:8px}
+.coach.compact .tut-btn{min-height:40px;padding:0 16px}
+.coach.compact .coach-skip{padding:6px 8px}
+.coach.fit .coach-skip{white-space:nowrap}
+.coach.fit .coach-actions{flex-wrap:wrap}
+
+/* settings panel while the slider step is showing: tighter on small screens so the card has room */
+@media (max-width:600px),(max-height:700px){
+  body.tour-fit #settings .settings-panel{padding:16px 18px}
+  body.tour-fit #settings .settings-head{margin-bottom:10px}
+  body.tour-fit .volume-row{margin:11px 0}
+  body.tour-fit .volume-label{margin-bottom:6px}
+  body.tour-fit .display-head{margin-top:12px}
+  body.tour-fit #settings .settings-sound{margin-top:7px;padding:11px}
+}
+
+/* landscape phones: label and slider share a line so the whole settings panel fits next to the card */
+@media (max-height:460px){
+  body.tour-fit #settings .settings-panel{padding:12px 16px}
+  body.tour-fit #settings .settings-head{margin-bottom:4px}
+  body.tour-fit #settings .settings-head h2{font-size:17px}
+  body.tour-fit .volume-row{display:flex;align-items:center;gap:12px;margin:10px 0}
+  body.tour-fit .volume-label{width:150px;flex:none;margin:0}
+  body.tour-fit .volume-row input{flex:1;min-width:0}
+  body.tour-fit .display-head{margin-top:10px}
+  body.tour-fit #settings .settings-sound{margin-top:5px;padding:9px}
+  body.tour-fit .settings-note{display:none}
+}
+
+/* How to Play panel: fits the real visible height on phones and tablets */
+.tut-panel{width:min(94vw,430px);max-height:94vh;max-height:calc(100dvh - 16px)}
+@media (max-height:700px){
+  .tut-panel{padding:16px 20px 12px}
+  .tut-head{margin-bottom:8px}
+  .tut-art{height:clamp(64px,15vh,100px);margin-bottom:10px}
+  .tut-title{font-size:19px;margin-bottom:6px}
+  .tut-text{font-size:11.5px;line-height:1.55;margin:0 0 10px}
+  .tut-keys{gap:6px}
+  .tut-foot{margin-top:12px}
+  .tut-skip{margin-top:4px;padding:6px 12px}
+}
+@media (max-height:480px){
+  .tut-art{display:none}
+  .tut-panel{width:min(94vw,520px)}
+}
+@media (min-width:768px) and (min-height:900px){
+  .tut-panel{width:min(70vw,500px)}
+  .tut-text{font-size:13px}
+}
+
+/* tour cards for every other step: stay on screen and respect the safe area on short or notched screens */
+@media (max-height:520px){
+  .coach{top:10px}
+  .coach.bottom,.coach.bottom.shop{top:auto;bottom:max(10px,env(safe-area-inset-bottom))}
+  .coach-card{padding:10px 14px 8px}
+  .coach-title,.coach.bottom .coach-title{font-size:16px;margin-bottom:4px}
+  .coach-text,.coach.bottom .coach-text{font-size:11.5px;line-height:1.5}
+  .coach-actions{margin-top:8px}
+}
+
+/* ===== crash screen: Fly Again is the primary action, Home and Continue sit below it ===== */
+#dead .death-actions{flex-wrap:wrap;gap:10px}
+#dead .death-actions #flyAgain{flex:1 1 100%;min-height:58px;padding:17px 12px;font-size:11px;letter-spacing:.24em}
+#dead .death-actions button:not(#flyAgain){flex:1 1 0;min-height:50px;white-space:normal}
+@media (max-height:680px){
+  #dead .hero{max-height:98vh}
+  #dead .eyebrow{margin-bottom:8px}
+  #dead h2{margin-bottom:14px;font-size:clamp(32px,6vw,48px)}
+  #dead .stat{padding:12px 10px 11px}
+  #dead .stat strong{font-size:18px}
+  #dead .payout{margin-bottom:14px}
+  #dead .payout-body{padding:4px 0}
+  #dead .payout-row{padding:5px 16px}
+  #dead .payout-total{padding:10px 16px}
+  #dead .death-actions #flyAgain{min-height:52px;padding:14px 12px}
+  #dead .death-actions button:not(#flyAgain){min-height:46px;padding:11px 10px}
+}
+/* landscape phones: two columns (stats left, credits right) with the three buttons in one row beneath */
+@media (max-height:460px){
+  #dead .hero{width:min(94vw,700px);max-height:98vh;display:grid;grid-template-columns:1fr 1fr;column-gap:22px;align-items:center}
+  #dead .eyebrow{grid-column:1;grid-row:1;margin:0 0 6px}
+  #dead h2{grid-column:1;grid-row:2;margin:0 0 10px;font-size:34px}
+  #dead .stats{grid-column:1;grid-row:3;margin:0}
+  #dead .payout{grid-column:2;grid-row:1/4;margin:0}
+  #dead .death-actions{grid-column:1/-1;grid-row:4;margin-top:12px;flex-wrap:nowrap}
+  #dead .death-actions #flyAgain{flex:1.5 1 0;min-height:46px;padding:12px}
+  #dead .death-actions button:not(#flyAgain){min-height:46px;padding:10px 8px;font-size:9px}
+}

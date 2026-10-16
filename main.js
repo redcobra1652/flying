@@ -81,6 +81,13 @@ function continueRun(){
   document.getElementById('distance').textContent=Math.floor(Dc).toLocaleString();document.getElementById('vignette').classList.remove('on')
 }
 document.getElementById('continue').addEventListener('click',continueRun);
+/* FLY AGAIN: straight from the crash screen into a fresh run. Taps in the first moments are ignored so a player still steering when they crash does not restart by accident. */
+(()=>{
+  const deadEl=document.getElementById('dead'),btn=document.getElementById('flyAgain');if(!deadEl||!btn)return;
+  let shownAt=0;
+  new MutationObserver(()=>{if(deadEl.classList.contains('active')&&!shownAt)shownAt=performance.now();else if(!deadEl.classList.contains('active'))shownAt=0}).observe(deadEl,{attributes:true,attributeFilter:['class']});
+  btn.addEventListener('click',()=>{if(state.mode!=='DEAD'||!shownAt||performance.now()-shownAt<450)return;startRun()})
+})();
 /* GAME LOOP */
 /* collision runs against the very blocks that are drawn (so rising obstacles only hurt once they have actually risen) */
 function planeCollides(){
@@ -176,11 +183,11 @@ function updateRollSystem(dt,axis,handling){
   /* bank fades out as the wing goes vertical; yaw grows a little so the nose still leads the turn */
   s.rollSteer=steer;return {steer,slip,bankMul:1-.8*k,yawMul:1+.9*k,extra:s.tumble+wobble};
 }
-let last=performance.now(),accum=0;function updatePlay(dt){const wd=dt*state.worldScale,keyAxis=(keys.has('arrowleft')||keys.has('a')?-1:0)+(keys.has('arrowright')||keys.has('d')?1:0),axis0=THREE.MathUtils.clamp(keyAxis+touchAxis,-1,1),stats=PLANES[save.equippedPlane],handling=1+(stats.handling-3)*.045,axis=state.tut?state.tut.axis(axis0):(state.apTimer>0?apAxis(dt,handling):axis0);const progress=state.distance/CONFIG.levelMeters,targetSpeed=state.tut?state.tut.speed:(state.arena?Math.min(36,speedAtDistance(state.arenaD0)):speedAtDistance(state.distance));state.speed=THREE.MathUtils.lerp(state.speed,targetSpeed,Math.min(1,wd*1.1));const rollSys=updateRollSystem(dt,axis,handling);state.vx+=(axis*rollSys.steer+rollSys.slip)*CONFIG.turnAccel*handling*dt+(state.extForce||0)*wd;state.vx*=Math.exp(-CONFIG.turnDamping*dt);state.vx=THREE.MathUtils.clamp(state.vx,-CONFIG.maxLateral,CONFIG.maxLateral);state.x+=state.vx*dt;state.bank=THREE.MathUtils.lerp(state.bank,-state.vx*.04,Math.min(1,dt*4.5));state.yaw=THREE.MathUtils.lerp(state.yaw,-state.vx*.014,Math.min(1,dt*3));state.distance+=state.speed*wd;state.worldZ+=state.speed*wd;state.worldClock+=wd;const idx=Math.min(LEVELS.length-1,Math.floor(progress));if(idx!==state.level&&!state.arena&&(idx<PERP_IDX||state.perpOK||state.level>=PERP_IDX))startLevelTransition(idx);if(state.transition<1)state.transition=Math.min(1,state.transition+wd/CONFIG.transitionSeconds);const diff=Math.max(0,(state.distance-state.levelStart)/CONFIG.levelMeters);plane.position.x=state.x;plane.position.y=CONFIG.baseAltitude+Math.sin(state.distance*.035)*.12+Math.sin(state.distance*.011)*.16;plane.rotation.set(0,state.yaw*rollSys.yawMul,state.bank*rollSys.bankMul+state.roll+rollSys.extra);if(prop1)prop1.rotation.z+=dt*state.speed*2.2;if(prop2)prop2.rotation.z+=dt*state.speed*2.2;if(!state.arena)streamChunks();if(state.shieldTimer<=0&&state.shieldSafety<=0&&planeCollides())burstCrash();else if(state.arena)updateArena(wd);else if(!state.tut){updateMeteorSpawns(wd);updateHazardSpawns(wd)}if(!state.arena)document.getElementById('distance').textContent=Math.floor(state.distance).toLocaleString()}
+let last=performance.now(),accum=0;function updatePlay(dt){const wd=dt*state.worldScale,keyAxis=(keys.has('arrowleft')||keys.has('a')?-1:0)+(keys.has('arrowright')||keys.has('d')?1:0),axis0=THREE.MathUtils.clamp(keyAxis+touchAxis,-1,1),stats=PLANES[save.equippedPlane],handling=1+(stats.handling-3)*.045,axis=state.tut?state.tut.axis(axis0):(state.apTimer>0?apAxis(dt,handling):axis0);const progress=state.distance/CONFIG.levelMeters,targetSpeed=state.tut?state.tut.speed:(state.arena?Math.min(36,speedAtDistance(state.arenaD0)):speedAtDistance(state.distance));state.speed=THREE.MathUtils.lerp(state.speed,targetSpeed,Math.min(1,wd*1.1));const rollSys=updateRollSystem(dt,axis,handling);state.vx+=(axis*rollSys.steer+rollSys.slip)*CONFIG.turnAccel*handling*dt+(state.extForce||0)*wd;state.vx*=Math.exp(-CONFIG.turnDamping*dt);state.vx=THREE.MathUtils.clamp(state.vx,-CONFIG.maxLateral,CONFIG.maxLateral);state.x+=state.vx*dt;state.bank=THREE.MathUtils.lerp(state.bank,-state.vx*.04,Math.min(1,dt*4.5));state.yaw=THREE.MathUtils.lerp(state.yaw,-state.vx*.014,Math.min(1,dt*3));state.distance+=state.speed*wd;state.worldZ+=state.speed*wd;state.worldClock+=wd;const idx=Math.min(LEVELS.length-1,Math.floor(progress));if(idx!==state.level&&!state.arena&&(idx<PERP_IDX||state.perpOK||state.level>=PERP_IDX))startLevelTransition(idx);if(state.transition<1)state.transition=Math.min(1,state.transition+wd/CONFIG.transitionSeconds);const diff=Math.max(0,(state.distance-state.levelStart)/CONFIG.levelMeters);plane.position.x=state.x;plane.position.y=CONFIG.baseAltitude+Math.sin(state.distance*.035)*.12+Math.sin(state.distance*.011)*.16;plane.rotation.set(0,state.yaw*rollSys.yawMul,state.bank*rollSys.bankMul+state.roll+rollSys.extra);if(prop1)prop1.rotation.z+=dt*state.speed*2.2;if(prop2)prop2.rotation.z+=dt*state.speed*2.2;if(!state.arena)streamChunks();if(state.shieldTimer<=0&&state.shieldSafety<=0&&planeCollides())burstCrash();else if(state.arena)updateArena(wd);else if(!state.tut){updateMeteorSpawns(wd);updateHazardSpawns(wd)}if(!state.arena){const dm=Math.floor(state.distance);if(dm!==state._dShown){state._dShown=dm;(window._distEl||(window._distEl=document.getElementById('distance'))).textContent=dm.toLocaleString()}}}
 function updateHome(dt){state.homeTime+=dt;state.worldZ+=dt*2.1;plane.position.x=Math.sin(state.homeTime*.24)*2.2;state.x=plane.position.x;plane.position.y=3.6+Math.sin(state.homeTime*.8)*.18;plane.rotation.z=Math.sin(state.homeTime*.3)*.04;plane.rotation.y=Math.sin(state.homeTime*.19)*.045;if(prop1)prop1.rotation.z+=dt*14;if(prop2)prop2.rotation.z+=dt*14;streamChunks()}
 const lookTarget=new THREE.Vector3();function updateCamera(dt){if(state.mode!=='PLAYING'){const f=Math.exp(-dt*6);state.lossRoll*=f;state.ctrlShake*=f}if(cockpitActive()&&cockpit){cockpitCamera(dt);return}const homeMode=state.mode==='HOME',hangarMode=state.mode==='SHOP',x=hangarMode?0:state.x;const desiredX=hangarMode?0:x,desiredY=hangarMode?4.05:(homeMode?5.2:5.2+Math.abs(state.bank)*.35),desiredZ=hangarMode?2.5:(homeMode?10.8:10.5);camera.position.x=hangarMode?THREE.MathUtils.lerp(camera.position.x,desiredX,Math.min(1,dt*2.4)):x;camera.position.y=THREE.MathUtils.lerp(camera.position.y,desiredY,Math.min(1,dt*3));camera.position.z=THREE.MathUtils.lerp(camera.position.z,desiredZ,Math.min(1,dt*3));lookTarget.set(hangarMode?0:x,hangarMode?2.7:.5,hangarMode?-3:-13);camera.lookAt(lookTarget);if(state.gustRoll)camera.rotateZ(state.gustRoll);if(state.lossRoll)camera.rotateZ(state.lossRoll);if(state.pw>.001)camera.rotateZ(state.pw*(state.reduced?.17:.436)*(.75*Math.sin(state.clock*.55)+.25*Math.sin(state.clock*1.3)));const targetFov=(hangarMode?48:57)+(state.mode==='PLAYING'?Math.min(10,(state.speed-12.4)*.42):0)+(state.mode==='CRASHING'?4:0)+(1-state.worldScale)*5+(state.wellWarpS||0)*(state.reduced?4:15)+(state.pw||0)*(state.reduced?4:14)*Math.sin(state.clock*.9);camera.fov=THREE.MathUtils.lerp(camera.fov,targetFov,Math.min(1,dt*2));camera.near=.1;camera.updateProjectionMatrix();skyDome.position.copy(camera.position);ambient.position.x=x;sun.position.set(x-9,19,5);sun.target.position.set(x,0,0);sun.target.updateMatrixWorld();const sh=state.shake+state.rumble+state.ctrlShake;if(sh>0){camera.position.x+=(Math.random()-.5)*sh;camera.position.y+=(Math.random()-.5)*sh*.7}}
 function updateAmbient(dt){if(state.mode==='SHOP')return;const a=ambientGeo.attributes.position.array,scale=state.mode==='PLAYING'?state.worldScale:1,step=dt*scale,pt=LEVELS[state.level].particle;for(let i=0;i<ambientN;i++){let j=i*3;a[j+2]+=((state.mode==='PLAYING'?state.speed:2.1)+ambientSpeeds[i])*(state.mode==='PLAYING'?step:step*.25);a[j+1]+=pt==='snow'?-step*1.2:pt==='rain'?-step*(15+ambientSpeeds[i]*2):pt==='petals'?-step*.7+Math.sin(performance.now()*.0007+i)*step*.35:pt==='embers'?step*(2+ambientSpeeds[i]*.35):Math.sin(performance.now()*.0005+i)*step*.09;if(pt==='sand')a[j]+=step*(13+ambientSpeeds[i]*2);else if(pt==='rain')a[j]-=step*1.5;else if(pt==='petals')a[j]+=step*Math.sin(i)*.9;if(a[j]>29)a[j]-=58;else if(a[j]<-29)a[j]+=58;if(a[j+2]>18){a[j+2]=-145-Math.random()*20;a[j]=(Math.random()-.5)*58;a[j+1]=Math.random()*23-1}if(a[j+1]<-2)a[j+1]=pt==='rain'?23:20;if(a[j+1]>24)a[j+1]=-1.5}ambientGeo.attributes.position.needsUpdate=true;}
-function updateTrails(){plane.updateMatrixWorld(true);for(const t of trailLines){const arr=t.line.geometry.attributes.position.array,anchor=wingWakeAnchors[t.s<0?0:1];for(let i=0;i<30;i++){const q=i/29,p=new THREE.Vector3(anchor[0],anchor[1]+q*.09,anchor[2]+q*(CONFIG.trailLength/Math.max(.01,plane.scale.x)));plane.localToWorld(p);arr[i*3]=p.x;arr[i*3+1]=p.y;arr[i*3+2]=p.z}t.line.geometry.attributes.position.needsUpdate=true;trailMat.opacity=state.mode==='PLAYING'?Math.min(.58,.2+state.speed*.018):.14}}
+const _trailV=new THREE.Vector3();function updateTrails(){plane.updateMatrixWorld(true);for(const t of trailLines){const arr=t.line.geometry.attributes.position.array,anchor=wingWakeAnchors[t.s<0?0:1];for(let i=0;i<30;i++){const q=i/29,p=_trailV.set(anchor[0],anchor[1]+q*.09,anchor[2]+q*(CONFIG.trailLength/Math.max(.01,plane.scale.x)));plane.localToWorld(p);arr[i*3]=p.x;arr[i*3+1]=p.y;arr[i*3+2]=p.z}t.line.geometry.attributes.position.needsUpdate=true;trailMat.opacity=state.mode==='PLAYING'?Math.min(.58,.2+state.speed*.018):.14}}
 function updateFlames(dt){const flying=state.mode==='PLAYING'||state.mode==='CUT1'||state.mode==='CUT2',throttle=flying?.3+.7*clampN((state.speed-CONFIG.baseSpeed)/(CONFIG.maxSpeed-CONFIG.baseSpeed),0,1):0,idle=state.mode==='HOME'?.17:state.mode==='SHOP'?.1:0,now=performance.now()*.001;for(const f of jetFlames){const flick=1+Math.sin(now*23+f.base*19)*.105+Math.sin(now*47+f.base*7)*.045,power=idle+throttle*(f.kind==='outer'?.95:.78),len=f.base*power*flick,width=(f.kind==='outer'?.58:.76)*flick;f.mesh.scale.set(width,Math.max(.001,len),width);f.mesh.position.z=.02+(f.kind==='outer'?.46:.265)*len;f.mesh.material.opacity=(f.kind==='outer'?.66:.9)*power}plane.updateMatrixWorld(true);const qLocal=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),Math.PI/2);for(const item of jetWakeMeshes){const {mesh,emitter,index}=item;if(!flying||!throttle){mesh.visible=false;continue}const nozzle=plane.localToWorld(emitter.clone()),forward=plane.localToWorld(emitter.clone().add(new THREE.Vector3(0,0,1))).sub(nozzle).normalize(),fade=1-index/12,dist=.24+index*.24,sway=Math.sin(now*19+index*1.7)*.035*fade;mesh.position.copy(nozzle).addScaledVector(forward,dist).add(new THREE.Vector3(Math.cos(now*11+index)*sway,Math.sin(now*13+index*.8)*sway,0));mesh.quaternion.copy(plane.quaternion).multiply(qLocal);mesh.scale.set(.7*fade,fade,.7*fade);mesh.material.opacity=throttle*.46*fade;mesh.visible=mesh.material.opacity>.018}}
 const wellFxEl=document.getElementById('wellFx'),wellV=new THREE.Vector3(),wellV2=new THREE.Vector3();let wellFxOn=false;
 function applyWellWarp(dt){
@@ -202,9 +209,13 @@ function applyWellWarp(dt){
   wellFxEl.style.setProperty('--wx',sx.toFixed(1)+'%');wellFxEl.style.setProperty('--wy',sy.toFixed(1)+'%');wellFxEl.style.setProperty('--wa',((state.clock*40)%360).toFixed(1)+'deg');wellFxEl.style.opacity=clampN(w*1.1,0,1).toFixed(3)
 }
 function frame(now){requestAnimationFrame(frame);const raw=Math.min(.05,(now-last)/1000);last=now;const dt=raw;accum+=dt;
- if(state.mode!=='PAUSED')state.clock+=dt;if(state.mode==='HOME')updateHome(dt);if(state.mode==='SHOP'){state.homeTime+=dt;plane.rotation.y+=dt*.22;plane.position.y=3.05+Math.sin(state.homeTime*1.1)*.12;const shopTx=state.shopTab==='abilities'&&innerWidth>900?-1.5:0;plane.position.x+=(shopTx-plane.position.x)*Math.min(1,dt*4);shieldBubble.visible=state.shopTab==='abilities';if(shieldBubble.visible){shieldBubble.position.copy(plane.position);shieldBubble.scale.setScalar(.42);shieldBubble.rotation.y=state.homeTime*.28;shieldBubble.material.uniforms.uAlpha.value=save.abilities.shield?.34:.2}if(state.hangarPulse>0)state.hangarPulse=Math.max(0,state.hangarPulse-dt);for(const m of planeParts)if(m.material?.emissive){m.material.emissive.setRGB(1,.78,.58);m.material.emissiveIntensity=state.hangarPulse*1.1}}if(state.mode==='PLAYING'){updateAbilities(dt);updatePlay(dt);if(state.tut&&state.mode==='PLAYING')state.tut.update(dt)}if(state.mode==='PLAYING'&&!state.gatePassed&&state.distance>=GATE_D){state.gatePassed=true;startCut1()}if(state.mode==='CRASHING')updateCrash(dt);if(state.mode==='PLAYING'||state.mode==='CRASHING')updateRisers();if(state.mode==='PLAYING')updateDynamics(dt*state.worldScale);if(state.terrainAnim)updateTerrain();if(state.mode==='PLAYING'||state.mode==='CRASHING'||state.mode==='DEAD')updateMeteors(dt*(state.mode==='PLAYING'?state.worldScale:1),state.mode==='PLAYING');if(state.mode!=='SHOP')pumpBuildQueue();blendVisuals(dt);updatePerplexityFx(dt);updateAmbient(dt);updateTrails();updateFlames(dt);ckFrame(dt);updateCamera(dt);updateAudio();const mT=state.transition,mFrom=LEVELS[state.fromLevel],mTo=LEVELS[state.toLevel],mw=(mFrom.moon?1-mT:0)+(mTo.moon?mT:0),cw=(mFrom.corona?1-mT:0)+(mTo.corona?mT:0),mcol=mTo.moon||mFrom.moon;if(mcol)moonMat.color.set(mcol);moonMat.opacity=Math.min(1,mw);moon.position.copy(camera.position).add(new THREE.Vector3(-19,15,-76));corona.position.copy(moon.position);corona.lookAt(camera.position);corona.visible=moon.visible&&cw>.01;coronaMatA.opacity=Math.min(1,cw)*.75;coronaMatB.opacity=Math.min(1,cw)*.2;updateCinematics(dt);if(state.mode!=='PAUSED')updateFx(dt*(state.mode==='PLAYING'?state.worldScale:1));applyWellWarp(dt);shieldBubble.material.uniforms.uTime.value=performance.now()*.001;renderer.render(scene,camera);}
+ if(state.mode!=='PAUSED')state.clock+=dt;if(state.mode==='HOME')updateHome(dt);if(state.mode==='SHOP'){state.homeTime+=dt;plane.rotation.y+=dt*.22;plane.position.y=3.05+Math.sin(state.homeTime*1.1)*.12;const shopTx=state.shopTab==='abilities'&&innerWidth>900?-1.5:0;plane.position.x+=(shopTx-plane.position.x)*Math.min(1,dt*4);shieldBubble.visible=state.shopTab==='abilities';if(shieldBubble.visible){shieldBubble.position.copy(plane.position);shieldBubble.scale.setScalar(.42);shieldBubble.rotation.y=state.homeTime*.28;shieldBubble.material.uniforms.uAlpha.value=save.abilities.shield?.34:.2}if(state.hangarPulse>0)state.hangarPulse=Math.max(0,state.hangarPulse-dt);for(const m of planeParts)if(m.material?.emissive){m.material.emissive.setRGB(1,.78,.58);m.material.emissiveIntensity=state.hangarPulse*1.1}}if(state.mode==='PLAYING'){updateAbilities(dt);updatePlay(dt);if(state.tut&&state.mode==='PLAYING')state.tut.update(dt)}if(state.mode==='PLAYING'&&!state.gatePassed&&state.distance>=GATE_D){state.gatePassed=true;startCut1()}if(state.mode==='CRASHING')updateCrash(dt);if(state.mode==='PLAYING'||state.mode==='CRASHING')updateRisers();if(state.mode==='PLAYING')updateDynamics(dt*state.worldScale);if(state.terrainAnim)updateTerrain();if(state.mode==='PLAYING'||state.mode==='CRASHING'||state.mode==='DEAD')updateMeteors(dt*(state.mode==='PLAYING'?state.worldScale:1),state.mode==='PLAYING');if(state.mode!=='SHOP')pumpBuildQueue();blendVisuals(dt);updatePerplexityFx(dt);updateAmbient(dt);updateTrails();updateFlames(dt);ckFrame(dt);updateCamera(dt);updateAudio();const mT=state.transition,mFrom=LEVELS[state.fromLevel],mTo=LEVELS[state.toLevel],mw=(mFrom.moon?1-mT:0)+(mTo.moon?mT:0),cw=(mFrom.corona?1-mT:0)+(mTo.corona?mT:0),mcol=mTo.moon||mFrom.moon;if(mcol)moonMat.color.set(mcol);moonMat.opacity=Math.min(1,mw);moon.position.copy(camera.position).add(new THREE.Vector3(-19,15,-76));corona.position.copy(moon.position);corona.lookAt(camera.position);corona.visible=moon.visible&&cw>.01;coronaMatA.opacity=Math.min(1,cw)*.75;coronaMatB.opacity=Math.min(1,cw)*.2;updateCinematics(dt);if(state.mode!=='PAUSED')updateFx(dt*(state.mode==='PLAYING'?state.worldScale:1));applyWellWarp(dt);shieldBubble.material.uniforms.uTime.value=performance.now()*.001;adaptRes(raw);renderer.render(scene,camera);}
+/* ADAPTIVE RESOLUTION: if the frame time stays high, render fewer pixels (the main cost on weak GPUs); if there is headroom, climb back up */
+let _ft=16.7,_adaptCool=2;function adaptRes(dt){if(state.mode==='PAUSED'||document.hidden)return;_ft+=(dt*1000-_ft)*.05;_adaptCool-=dt;if(_adaptCool>0)return;let next=curDpr;
+  if(_ft>24&&curDpr>.85)next=Math.max(.85,curDpr-.1);else if(_ft<13.5&&curDpr<PERF.maxDpr)next=Math.min(PERF.maxDpr,curDpr+.1);
+  if(Math.abs(next-curDpr)>.01){curDpr=next;renderer.setPixelRatio(curDpr);renderer.setSize(innerWidth,innerHeight);_adaptCool=4;_ft=16.7}}
 requestAnimationFrame(frame);
-window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.setSize(innerWidth,innerHeight)});
+window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setPixelRatio(curDpr);renderer.setSize(innerWidth,innerHeight)});
 
 /* ---------- TUTORIAL ---------- */
 (()=>{
@@ -273,18 +284,99 @@ const markSeen=()=>{try{localStorage.setItem(FLAG,'1')}catch{}};
 const cap=(label,key)=>`<kbd class="k" data-k="${key}">${label}</kbd>`;
 const pill=t=>`<span class="coach-pill">${t}</span>`;
 let capEls=[];
-let ringSel=null,ringRaf=0;
+let ringSel=null,ringFit=null,ringRaf=0,fitSig='';
 function ringLoop(){
   if(!ringSel){ringRaf=0;return}
-  const t=document.querySelector(ringSel);
-  if(t){const r=t.getBoundingClientRect();if(r.width>0&&r.height>0){ring.style.left=(r.left-6)+'px';ring.style.top=(r.top-6)+'px';ring.style.width=(r.width+12)+'px';ring.style.height=(r.height+12)+'px';ring.classList.add('show')}else ring.classList.remove('show')}else ring.classList.remove('show');
+  let r=null;
+  if(ringFit)r=ringFit.rect();else{const t=document.querySelector(ringSel);if(t)r=t.getBoundingClientRect()}
+  if(r&&r.width>0&&r.height>0){ring.style.left=(r.left-6)+'px';ring.style.top=(r.top-6)+'px';ring.style.width=(r.width+12)+'px';ring.style.height=(r.height+12)+'px';ring.classList.add('show');if(ringFit)fitCoach()}else ring.classList.remove('show');
   ringRaf=requestAnimationFrame(ringLoop)
 }
-function setRing(sel){ringSel=sel||null;if(!ringSel){ring.classList.remove('show');return}if(!ringRaf)ringLoop()}
+function setRing(sel,fit){ringSel=sel||null;ringFit=fit||null;fitSig='';if(!ringSel){ring.classList.remove('show');return}if(!ringRaf)ringLoop()}
+
+/* ---- fit steps: the abilities step and the settings-slider step ----
+   Their card is placed beside the highlighted panel (below, above or to the side, whichever has room on this screen) so it never sits on top of
+   the panel or its red outline. On the settings step the panel itself is also shrunk or moved when the screen is too small for both. */
+const qs=s=>document.querySelector(s);
+const clampPx=(v,a,b)=>Math.max(a,Math.min(b,v));
+const mkRect=(l,t,r,b)=>({left:l,top:t,right:r,bottom:b,width:r-l,height:b-t});
+const panelRect=sel=>{const e=qs(sel);return e?e.getBoundingClientRect():null};
+/* one rectangle: from just above the MUSIC label down to just above the RESET DISPLAY button */
+function sliderRect(){
+  const row=qs('#musicVolume')&&qs('#musicVolume').closest('.volume-row'),reset=qs('#displayReset');
+  if(!row||!reset)return null;
+  const a=row.getBoundingClientRect(),b=reset.getBoundingClientRect();
+  return mkRect(a.left,a.top-3,a.right,b.top-14)   /* the ring adds 6px on every side: ends up 9px above MUSIC and 8px above RESET DISPLAY */
+}
+const FIT={
+  abilities:{rect:()=>panelRect('.hangar-panel'),avoid:()=>panelRect('.hangar-panel'),order:['below','above','left','right'],valign:'bottom',lift:70,liftAbove:28,   /* keep clear of the ABILITY PREVIEW label */
+    sig:r=>[r.left,r.top,r.width,r.height].map(Math.round).join(',')},
+  settings:{rect:sliderRect,avoid:()=>panelRect('#settings .settings-panel'),order:['right','left','below','above'],valign:'center',squeeze:true,
+    sig:()=>{const p=qs('#settings .settings-panel');return p?p.offsetWidth+','+p.offsetHeight:''}}
+};
+function coachHeight(w){coach.style.width=Math.round(w)+'px';return coach.offsetHeight}
+function tryPlacements(f,order,W,H){
+  const M=10,G=12,rr=f.rect(),av=f.avoid();
+  if(!rr||!av)return null;
+  const topEdge=Math.min(av.top,rr.top-6),botEdge=Math.max(av.bottom,rr.bottom+6),leftEdge=Math.min(av.left,rr.left-6),rightEdge=Math.max(av.right,rr.right+6);
+  const wMax=Math.min(380,W-2*M),minW=(W<=600||H<=700)?176:240,cx=(av.left+av.right)/2,cy=(rr.top+rr.bottom)/2;
+  for(const side of order){
+    if(side==='below'||side==='above'){
+      const h=coachHeight(wMax),left=clampPx(cx-wMax/2,M,W-M-wMax);
+      if(side==='below'&&H-botEdge>=h+G+M)return{left,top:botEdge+G,w:wMax};
+      const la=f.liftAbove||0;if(side==='above'&&topEdge>=h+G+M+la)return{left,top:topEdge-G-h-la,w:wMax}
+    }else{
+      const room=side==='right'?W-rightEdge-G-M:leftEdge-G-M,w=Math.min(wMax,room);
+      if(w<minW)continue;
+      const h=coachHeight(w);if(h>H-2*M)continue;
+      const top=f.valign==='bottom'?clampPx(botEdge-h-(f.lift||0),M,H-h-M):clampPx(cy-h/2,M,H-h-M);
+      return{left:side==='right'?rightEdge+G:leftEdge-G-w,top,w}
+    }
+  }
+  return null
+}
+/* settings step: try full size first, then pin the panel to the bottom/top and shrink it a little, until the card fits next to it */
+function settingsLayout(al,s){
+  const p=qs('#settings .settings-panel'),scr=qs('#settings');if(!p||!scr)return;
+  p.style.transform=s<1?'scale('+s+')':'';p.style.transformOrigin=al==='bottom'?'50% 100%':al==='top'?'50% 0':al==='left'?'0 50%':'50% 50%';
+  scr.style.alignItems=al==='bottom'?'flex-end':al==='top'?'flex-start':'';scr.style.paddingBottom=al==='bottom'?'10px':'';scr.style.paddingTop=al==='top'?'10px':'';
+  scr.style.justifyContent=al==='left'?'flex-start':'';scr.style.paddingLeft=al==='left'?'10px':''
+}
+let settingsDown=false,settingsPending=null;
+function settingsLayoutReset(){
+  const run=()=>{document.body.classList.remove('tour-fit');settingsLayout('center',1)};
+  if(settingsDown)settingsPending=run;else run()
+}
+function squeezeSettings(f,W,H){
+  const by={center:['right','left','below','above'],left:['right'],bottom:['above'],top:['below']};
+  for(const s of [1,.9,.8,.7])for(const al of ['center','left','bottom','top']){
+    settingsLayout(al,s);
+    const pr=panelRect('#settings .settings-panel');                      /* the panel itself must stay fully on screen */
+    if(!pr||pr.top<-.5||pr.left<-.5||pr.bottom>H+.5||pr.right>W+.5)continue;
+    const pos=tryPlacements(f,by[al],W,H);if(pos)return pos
+  }
+  settingsLayout('center',.7);return null
+}
+function fitCoach(){
+  const f=ringFit;if(!f)return;
+  const rr=f.rect();if(!rr)return;
+  const W=innerWidth,H=innerHeight,sig=W+'x'+H+'|'+f.sig(rr);
+  if(sig===fitSig)return;fitSig=sig;
+  coach.classList.toggle('compact',W<=600||H<=700);
+  let pos=f.squeeze?squeezeSettings(f,W,H):tryPlacements(f,f.order,W,H);
+  if(!pos){const w=Math.min(380,W-20),h=coachHeight(w);pos={left:(W-w)/2,top:H-h-10,w}}   /* nothing fits: sit at the bottom edge, card is opaque so the outline never shows through */
+  coach.style.left=Math.round(pos.left)+'px';coach.style.top=Math.round(pos.top)+'px';coach.style.width=Math.round(pos.w)+'px'
+}
+/* if a slider drag is what moved the tour on, wait until the finger lifts before putting the panel back, so the slider does not jump under it */
+const settingsScreen=document.getElementById('settings');
+if(settingsScreen)settingsScreen.addEventListener('pointerdown',e=>{if(e.target.matches&&e.target.matches('input[type=range]'))settingsDown=true},true);
+const settingsUp=()=>{settingsDown=false;if(settingsPending){const f=settingsPending;settingsPending=null;f()}};
+window.addEventListener('pointerup',settingsUp);window.addEventListener('pointercancel',settingsUp);
 
 /* ---- coach card ---- */
 function coachShow(o){
   coach.classList.remove('ok');coach.classList.toggle('bottom',o.pos==='bottom');coach.classList.toggle('shop',!!o.shop);coach.classList.toggle('big',!o.pos);
+  coach.classList.toggle('fit',!!o.fit);if(!o.fit){coach.classList.remove('compact');coach.style.left=coach.style.top=coach.style.width=''}
   cTag.textContent=o.tag||'';cTitle.textContent=o.title||'';cText.innerHTML=o.text||'';
   cKeys.innerHTML=o.keys||'';cKeys.hidden=!o.keys;capEls=[...cKeys.querySelectorAll('kbd[data-k]')];
   cNext.hidden=!o.next;if(o.next)cNext.textContent=o.next;
@@ -481,7 +573,7 @@ if(settingsEl)settingsEl.addEventListener('input',()=>{settingsTouched=true});
 const tap=touch?'Tap':'Click';
 const TOUR=[
   {mode:'HOME',target:'#homeShop',tag:'THE SHOP',title:'Spend what you earn',text:`Credits from every flight buy abilities and aircraft. ${tap} the shop button.`,done:()=>state.mode==='SHOP'},
-  {mode:'SHOP',target:'.hangar-panel',tag:'ABILITIES',title:'Three tools for the sky',text:'Unlock and upgrade Shield, Slow-Mo and Autopilot here, then trigger them mid-flight.',next:'NEXT',shop:true},
+  {mode:'SHOP',target:'.hangar-panel',fit:'abilities',tag:'ABILITIES',title:'Three tools for the sky',text:'Unlock and upgrade Shield, Slow-Mo and Autopilot here, then trigger them mid-flight.',next:'NEXT',shop:true},
   {mode:'SHOP',target:'#planesTab',tag:'HANGAR',title:'Now the aircraft',text:`${tap} the Hangar tab to see your planes.`,shop:true,done:()=>state.shopTab==='hangar'},
   {mode:'SHOP',target:'#planeRail',tag:'HANGAR',title:'Pick your plane',text:'Each aircraft handles and sees differently. '+tap+' one to preview it.',next:'NEXT',shop:true},
   {mode:'SHOP',target:'#hangarBack',tag:'ALL SET',title:'Back to the runway',text:`${tap} Back when you are ready.`,shop:true,done:()=>state.mode==='HOME'},
@@ -489,7 +581,7 @@ const TOUR=[
   {mode:'HOME',target:'.stats-panel',tag:'STATISTICS',title:'Your flight record',text:'Your longest flight, lifetime distance and how many maps you have reached.',next:'NEXT',shop:true,needs:statsOpen,skipTo:'SETTINGS_I'},
   {mode:'HOME',target:'#closeStats',tag:'STATISTICS',title:'Nicely done',text:`${tap} the ✕ to close it.`,shop:true,done:()=>!statsOpen()},
   {mode:'HOME',target:'#openSettings',tag:'SETTINGS',title:'Make it yours',text:`${tap} Settings to adjust sound and display.`,done:settingsOpen},
-  {mode:'HOME',target:'.settings-panel',tag:'SETTINGS',title:'Try a slider',text:'Drag volume, brightness or contrast. Changes apply instantly.',next:'NEXT',shop:true,needs:settingsOpen,done:()=>settingsTouched},
+  {mode:'HOME',target:'#settings .settings-panel',fit:'settings',tag:'SETTINGS',title:'Try a slider',text:'Drag volume, brightness or contrast. Changes apply instantly.',next:'NEXT',shop:true,needs:settingsOpen,done:()=>settingsTouched},
   {mode:'HOME',target:'#closeSettings',tag:'SETTINGS',title:'Almost done',text:`${tap} the ✕ to close settings.`,shop:true,done:()=>!settingsOpen()},
   {mode:'HOME',target:'#homeHelp',tag:'NEED A REFRESHER?',title:'Help is always here',text:'The ? button in the top corner replays How to Play any time.',next:'NEXT',shop:true},
   {mode:'HOME',target:'#play',tag:'READY',title:'Take flight',text:touch?'Tap TAKE FLIGHT to start your first real run.':'Click TAKE FLIGHT, or press Space, to start your first real run.',shop:true}
@@ -498,7 +590,8 @@ const STATS_I=5,SETTINGS_I=8,HELP_I=TOUR.length-2;
 let tourI=-1,tourTimer=null,tourAdvance=false;
 function tourRender(){
   const st=TOUR[tourI];if(!st)return;tourAdvance=false;
-  coachShow({pos:'bottom',shop:st.shop,tag:st.tag,title:st.title,text:st.text,next:st.next,skip:true});setRing(st.target)
+  if(st.fit==='settings')document.body.classList.add('tour-fit');else settingsLayoutReset();
+  coachShow({pos:'bottom',shop:st.shop,tag:st.tag,title:st.title,text:st.text,next:st.next,skip:true,fit:!!st.fit});setRing(st.target,st.fit?FIT[st.fit]:null)
 }
 function tourTick(){
   const st=TOUR[tourI];if(!st)return;
@@ -522,7 +615,7 @@ function startTour(){
   if(state.mode!=='HOME')return;
   tourI=-1;tourGo(0);clearInterval(tourTimer);tourTimer=setInterval(tourTick,150)
 }
-function endTour(){tourI=-1;clearInterval(tourTimer);coachHide()}
+function endTour(){tourI=-1;clearInterval(tourTimer);coachHide();settingsLayoutReset()}
 cNext.addEventListener('click',()=>{tourAdvance=true});
 cSkip.addEventListener('click',endTour);
 

@@ -1,7 +1,13 @@
 // Core configuration, scene setup, rendering, controls, and shared game systems.
+/* PERFORMANCE TIER: auto-detected, override with ?quality=low|med|high (remembered in localStorage) */
+const PERF=(()=>{let forced=null;try{const q=new URLSearchParams(location.search).get('quality');if(q&&['low','med','high'].includes(q)){localStorage.setItem('farflight-quality',q);forced=q}else forced=localStorage.getItem('farflight-quality')}catch(e){}
+  const mem=navigator.deviceMemory||8,cores=navigator.hardwareConcurrency||8,touch=matchMedia('(pointer:coarse)').matches,dpr=window.devicePixelRatio||1;
+  let tier=forced;if(!tier)tier=(mem<=4||cores<=4)?'low':(touch||mem<=6||cores<=6)?'med':'high';
+  const T={low:{aa:true,shadows:false,maxDpr:1,chunksAhead:3,startDpr:1},med:{aa:true,shadows:true,shadowSize:512,maxDpr:1.5,chunksAhead:4,startDpr:1},high:{aa:true,shadows:true,shadowSize:1024,maxDpr:2,chunksAhead:4,startDpr:Math.min(dpr,1.5)}}[tier];
+  return {tier,...T,maxDpr:Math.min(dpr,T.maxDpr),startDpr:Math.min(dpr,T.startDpr)}})();
 /* CONFIG */
 const CONFIG={
-  chunkSize:40,cell:2,chunksX:5,chunksAhead:4,chunksBehind:1,baseAltitude:3.45,
+  chunkSize:40,cell:2,chunksX:5,chunksAhead:PERF.chunksAhead,chunksBehind:1,baseAltitude:3.45,
   baseSpeed:21.7,maxSpeed:40,speedGain:.0006,levelBump:.8,           /* 21.7 = 1.75 x the old 12.4 start speed */
   turnAccel:44,turnDamping:4.6,maxLateral:18,collisionForgiveness:.4,planeCollisionX:1.15,planeCollisionZ:1.3,planeCollisionY:.27,crashHitStop:.08,crashDelay:1,slowMo:.3,slowMoEase:.95,transitionSeconds:3,
   levelMeters:850,visibility:108,ambientCount:180,crashPieceGravity:12,blockPopRadius:7,bestKey:'farflight-best-v1',trailLength:20,
@@ -23,7 +29,7 @@ const PLANES=[
 const ABILITIES={
  shield:{name:'SHIELD',desc:'Pass through obstacles and meteor blasts.',prices:[3000,3500,6000],levels:[null,{duration:3,cooldown:50},{duration:4,cooldown:40},{duration:5,cooldown:30}]},
  slow:{name:'SLOW-MO',desc:'Ease time around you while steering stays quick.',prices:[3000,3500,6000],levels:[null,{duration:3,cooldown:50},{duration:4,cooldown:40},{duration:5,cooldown:30}]},
- autopilot:{name:'AUTOPILOT',desc:'Hands-free flight. Weaves around obstacles, rolls through tight gaps and fires Shield or Slow-Mo itself in an emergency.',prices:[3000,3500,6000],levels:[null,{duration:10,cooldown:100},{duration:15,cooldown:95},{duration:20,cooldown:90}]}
+ autopilot:{name:'AUTOPILOT',desc:'Hands-free flight. Weaves around obstacles, rolls through tight gaps and fires Shield or Slow-Mo itself in an emergency.',prices:[3000,3500,6000],levels:[null,{duration:10,cooldown:100},{duration:15,cooldown:95},{duration:30,cooldown:20}]}
 };
 const ECONOMY={saveKey:'farflight-save-v2',startingCredits:0,runRate:9,runExponent:1.15,runPerMeters:100,roundTo:5,levelBase:15,levelStep:10,levelCap:120,milestones:[{meters:3000,bonus:150},{meters:8000,bonus:300},{meters:15000,bonus:500},{meters:25000,bonus:800},{meters:40000,bonus:1200},{meters:60000,bonus:1800}],repeatEvery:25000,repeatBonus:1500,perplexBonus:500,arenaBonus:750};
 const LEVELS=[
@@ -32,12 +38,12 @@ const LEVELS=[
  {name:'Night',skyTop:'#0c1538',skyHorizon:'#3a3470',fog:'#1d2147',fogFar:90,sun:'#9ba9ff',hemi:'#6a74a8',ground:'#30336a',palette:['#30336a','#3c4178','#4c5290','#6068a6','#7d89bb'],height:13,maxHeight:25,density:.36,scale:.06,gap:.25,ambient:'#abb8ff',particle:'stars',accent:'#ffbf72',glow:'#75aaff',moon:'#dceaff',hemiI:1.4},
  {name:'Neon Void',skyTop:'#0d0f2a',skyHorizon:'#4d2870',fog:'#17163b',fogFar:82,sun:'#ff55cf',hemi:'#5a54b8',ground:'#1a1c3c',palette:['#212445','#322d5e','#43337a','#574094','#7050ac'],height:16,maxHeight:30,density:.38,scale:.07,gap:.28,ambient:'#ff51dc',particle:'neon',accent:'#fff06a',glow:'#31dfff',ambientSize:.2,hemiI:1.35},
  {name:'Ice Storm',skyTop:'#a8d5e4',skyHorizon:'#e4f3ef',fog:'#cee6e9',fogFar:112,sun:'#eefeff',hemi:'#f2ffff',ground:'#719baa',palette:['#567e93','#709caf','#91bdc9','#b6d9dc','#e3eff0'],height:18,maxHeight:34,density:.4,scale:.065,gap:.27,ambient:'#dffbff',particle:'snow',accent:'#ff7b66',ambientSize:.22},
- /* ---- maps 6-14. sunI / hemiI = light intensity (defaults 2.1 / 1.2); glow = night-light colour; spikes = cone obstacles; moon / corona / scan = sky + screen extras ---- */
+ /* ---- maps 6-14. sunI / hemiI = light intensity (defaults 2.1 / 1.2); glow = night-light colour; spikes = cone obstacles; crystals = faceted crystal clusters; moon / corona / scan = sky + screen extras ---- */
  {name:'Thunderstorm',skyTop:'#262d40',skyHorizon:'#59647c',fog:'#434d62',fogFar:92,sun:'#8a97b5',hemi:'#7d8aa8',ground:'#2d3a45',palette:['#2f3d4a','#3b4b5a','#4a5c6c','#5d7080','#748898'],height:16,maxHeight:30,density:.38,scale:.065,gap:.27,ambient:'#b8c8e8',particle:'rain',ambientSize:.11,accent:'#ffe36a',sunI:1.1,hemiI:1},
  {name:'Dune Sea',skyTop:'#d4965a',skyHorizon:'#f7dca4',fog:'#e5bd84',fogFar:100,sun:'#fff0c8',hemi:'#f6d8a8',ground:'#b9873f',palette:['#b9873f','#cf9c52','#dcb06a','#e8c585','#f1d7a2'],height:12,maxHeight:24,density:.36,scale:.05,gap:.24,ambient:'#f3d6a0',particle:'sand',ambientSize:.13,accent:'#2f8fa0'},
  {name:'Magma Fields',skyTop:'#1d0808',skyHorizon:'#a32d12',fog:'#4a1510',fogFar:90,sun:'#ff8a3c',hemi:'#a8442a',ground:'#3a1a14',palette:['#2a1210','#3d1a14','#5a261a','#7a3320','#a04a28'],height:16,maxHeight:30,density:.38,scale:.07,gap:.28,ambient:'#ff9a4a',particle:'embers',ambientSize:.17,accent:'#ffd25a',glow:'#ff7a2a',sunI:1.5},
  {name:'Blossom Valley',skyTop:'#f0a9c4',skyHorizon:'#fff0ee',fog:'#f6d6df',fogFar:130,sun:'#fff0d8',hemi:'#fff0f0',ground:'#7ea66c',palette:['#6f9a60','#86b073','#a6c487','#f2c0cc','#ffd9e2'],height:9,maxHeight:18,density:.3,scale:.045,gap:.2,ambient:'#ffc2d4',particle:'petals',ambientSize:.2,accent:'#ff5a7a'},
- {name:'Crystal Caverns',skyTop:'#0a1f2e',skyHorizon:'#3a2a6c',fog:'#14263e',fogFar:84,sun:'#9a8cff',hemi:'#4a7aa8',ground:'#18243a',palette:['#2a4a7a','#3e72a8','#56a0c8','#7ac8d8','#b0ecf0'],height:15,maxHeight:28,density:.36,scale:.06,gap:.26,ambient:'#9ae8ff',particle:'spores',ambientSize:.15,accent:'#ffb04a',glow:'#7a6aff',spikes:true,sunI:1.3,hemiI:1.1},
+ {name:'Crystal Caverns',skyTop:'#0a1f2e',skyHorizon:'#3a2a6c',fog:'#14263e',fogFar:84,sun:'#9a8cff',hemi:'#4a7aa8',ground:'#18243a',palette:['#2a4a7a','#3e72a8','#56a0c8','#7ac8d8','#b0ecf0'],height:15,maxHeight:28,density:.36,scale:.06,gap:.26,ambient:'#9ae8ff',particle:'spores',ambientSize:.15,accent:'#ffb04a',glow:'#7a6aff',crystals:true,sunI:1.3,hemiI:1.1},
  {name:'Golden Ruins',skyTop:'#c4783a',skyHorizon:'#f8d890',fog:'#e0b070',fogFar:105,sun:'#ffd890',hemi:'#f2cc90',ground:'#8a6a3a',palette:['#8a6a3a','#a8844a','#c4a068','#dcc088','#eedcaa'],height:14,maxHeight:26,density:.36,scale:.055,gap:.25,ambient:'#ffe0a0',particle:'dust',ambientSize:.15,accent:'#3aa0a8'},
  {name:'Eclipse',skyTop:'#0a0a18',skyHorizon:'#8a3a18',fog:'#1a1424',fogFar:92,sun:'#ff9a50',hemi:'#5e4a78',ground:'#221f30',palette:['#2a2640','#383252','#483f66','#5d5282','#78699e'],height:16,maxHeight:30,density:.38,scale:.07,gap:.28,ambient:'#ff9a50',particle:'stars',ambientSize:.17,accent:'#ffb04a',glow:'#a86aff',moon:'#020204',corona:true,sunI:1.3,hemiI:1.15},
  {name:'Glitch Grid',skyTop:'#02060a',skyHorizon:'#0a2a2a',fog:'#04100f',fogFar:82,sun:'#40ffd0',hemi:'#1a6a6a',ground:'#06100f',palette:['#0a1a1a','#1c7a68','#164848','#1f6060','#2a8080'],height:14,maxHeight:26,density:.38,scale:.06,gap:.26,ambient:'#ff40d0',particle:'neon',ambientSize:.2,accent:'#ff40d0',glow:'#ff40d0',scan:true,sunI:1,hemiI:1},
@@ -83,12 +89,12 @@ function runCredits(d){return roundTo5(ECONOMY.runRate*Math.pow(Math.max(0,d)/EC
 function levelBonus(n){return Math.min(ECONOMY.levelCap,ECONOMY.levelBase+ECONOMY.levelStep*n)}
 function milestoneAt(m){const fixed=ECONOMY.milestones.find(x=>m<x.meters);if(fixed)return fixed;const last=ECONOMY.milestones[ECONOMY.milestones.length-1],step=Math.floor((m-last.meters)/ECONOMY.repeatEvery)+1;return {meters:last.meters+step*ECONOMY.repeatEvery,bonus:ECONOMY.repeatBonus}}
 function money(n){return Math.floor(n).toLocaleString()}
-const stage=document.getElementById('stage');let renderer;try{renderer=new THREE.WebGLRenderer({antialias:true,alpha:false})}catch(error){window.__farflightShowBootError?.(`WebGL could not start: ${error?.message||error}`);throw error}
-renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.12;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;stage.prepend(renderer.domElement);
+const stage=document.getElementById('stage');let renderer;try{renderer=new THREE.WebGLRenderer({antialias:PERF.aa,alpha:false,powerPreference:'high-performance',stencil:false})}catch(error){window.__farflightShowBootError?.(`WebGL could not start: ${error?.message||error}`);throw error}
+let curDpr=PERF.startDpr;renderer.setPixelRatio(curDpr);renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.12;renderer.shadowMap.enabled=PERF.shadows;renderer.shadowMap.type=THREE.PCFShadowMap;stage.prepend(renderer.domElement);
 const scene=new THREE.Scene();scene.fog=new THREE.Fog(LEVELS[0].fog,20,CONFIG.visibility);
 const camera=new THREE.PerspectiveCamera(57,innerWidth/innerHeight,.1,320);camera.position.set(0,5.2,10.5);camera.lookAt(0,.5,-13);
 const skyGeo=new THREE.SphereGeometry(210,32,18);const skyMat=new THREE.ShaderMaterial({side:THREE.BackSide,depthWrite:false,uniforms:{top:{value:new THREE.Color(LEVELS[0].skyTop)},horizon:{value:new THREE.Color(LEVELS[0].skyHorizon)},offset:{value:.08},uPerp:{value:0},uT:{value:0},uPulse:{value:0},uFog:{value:new THREE.Color(0,0,0)}},vertexShader:`varying vec3 vP;void main(){vP=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,fragmentShader:`uniform vec3 top;uniform vec3 horizon;uniform float offset;uniform float uPerp;uniform float uT;uniform float uPulse;uniform vec3 uFog;varying vec3 vP;void main(){vec3 d=normalize(vP);float h=d.y;float t=smoothstep(-.22,.72,h+offset);vec3 col=mix(horizon,top,t);if(uPerp>.001){vec2 p=(d.xy-vec2(0.,.1))/(1.1-d.z);float r=length(p),a=atan(p.y,p.x);float s1=sin(a*3.+log(r+.02)*5.5-uT*1.1);float s2=sin(a*5.-log(r+.02)*9.+uT*.7);float w=smoothstep(-.2,.2,s1*.7+s2*.3);float ring=sin(r*30.-uT*3.)*.5+.5;float v=w*(.78+.22*ring);v*=mix(.45,1.,uPulse);v=mix(v,v*.35+.05,smoothstep(.6,1.,s2*s2)*.0);vec3 sp=mix(uFog,vec3(v),smoothstep(-.03,.24,h));col=mix(col,sp,uPerp);}gl_FragColor=vec4(col,1.);}`});const skyDome=new THREE.Mesh(skyGeo,skyMat);scene.add(skyDome);
-const hemi=new THREE.HemisphereLight(LEVELS[0].hemi,LEVELS[0].ground,1.2);scene.add(hemi);const sun=new THREE.DirectionalLight(LEVELS[0].sun,2.1);sun.position.set(-9,19,5);scene.add(sun);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);sun.shadow.camera.left=-25;sun.shadow.camera.right=25;sun.shadow.camera.top=25;sun.shadow.camera.bottom=-25;sun.shadow.bias=-.0005;
+const hemi=new THREE.HemisphereLight(LEVELS[0].hemi,LEVELS[0].ground,1.2);scene.add(hemi);const sun=new THREE.DirectionalLight(LEVELS[0].sun,2.1);sun.position.set(-9,19,5);scene.add(sun);sun.castShadow=true;sun.shadow.mapSize.set(PERF.shadowSize||512,PERF.shadowSize||512);sun.shadow.camera.left=-25;sun.shadow.camera.right=25;sun.shadow.camera.top=25;sun.shadow.camera.bottom=-25;sun.shadow.bias=-.0005;
 const nightLight=new THREE.PointLight(0x7edcff,0,25,2);scene.add(nightLight);
 /* LOW BLOCK GROUND + OPEN OBSTACLE FIELD + SMOOTHLY STREAMED OBSTACLES */
 const chunks=[],cellsPerSide=CONFIG.chunkSize/CONFIG.cell,cellTotal=cellsPerSide*cellsPerSide,CHUNK=CONFIG.chunkSize;
@@ -97,6 +103,85 @@ const groundMat=new THREE.MeshStandardMaterial({color:LEVELS[0].palette[3],rough
 const boxObstacleMat=new THREE.MeshStandardMaterial({color:'#ffffff',roughness:.82,flatShading:true,transparent:true,opacity:1});
 const spikeObstacleMat=new THREE.MeshStandardMaterial({color:'#ffffff',roughness:.78,transparent:true,opacity:0});
 const boxGeo=new THREE.BoxGeometry(1,1,1),spikeGeo=new THREE.ConeGeometry(.8,1,12,1,false);
+/* ---- CRYSTALS (Crystal Caverns obstacles) ----
+   One merged, flat-shaded geometry per obstacle: a hexagonal prism with a pointed terminus (the part the hitbox is built around, so it
+   fills the obstacle's full height) plus 1-2 fat crystals sprouting beside it (2-3 crystals per obstacle, never a swarm). The base crystals are modelled in METRES
+   and the vertex shader turns them back into the obstacle's unit box, so their size does not stretch with the pillar height. Per instance
+   the shader also rotates the group, randomises each base crystal's height (never taller than 70% of the pillar) and the CPU varies the
+   width. Everything stays inside the obstacle's footprint (circle radius .5), so collision is unchanged.
+   Hue = smooth low-frequency noise across the terrain, so crystals of the same colour grow in patches and blend into neighbouring hues.
+   Shimmer is all fragment shader (no per-frame CPU work) and only plays as a warning while an obstacle is about to sink or rise
+   (aSpark, 0..1 per instance); idle crystals are static. */
+const CRYSTAL_COLORS=['#7dff3a','#19ffe1','#2f8bff','#9b5cff','#ff3df2','#ff4f9a'].map(c=>new THREE.Color(c));   /* ordered by hue so neighbouring patches blend */
+const CRYSTAL_SIDE=[   /* fat base crystals: d = distance from centre, r = radius, l = outward lean (all unit-box), hn = nominal height in metres. #2 is dropped on ~40% of obstacles, so each obstacle has 2 or 3 crystals */
+ {d:.20,r:.17,l:.03,hn:6},{d:.22,r:.14,l:.03,hn:3.6}];
+function makeCrystalGeo(){
+  const pos=[],face=[],hnA=[],idA=[];let fid=0;
+  function addCrystal(x,z,r,base,top,tipFrac,lx,lz,rot,ax,az,hn,id){
+    const n=6,H=top-base,ysh=top-tipFrac*H,ctr=[x+lx*.5,(base+top)*.5,z+lz*.5];
+    const ring=(y,rad)=>{const k=(y-base)/H,a=[];for(let i=0;i<n;i++){const t=rot+i/n*Math.PI*2;a.push([x+lx*k+Math.cos(t)*rad,y,z+lz*k+Math.sin(t)*rad])}return a};
+    const bot=ring(base,r),sh=ring(ysh,r*.9),apex=[x+lx+ax*r,top,z+lz+az*r];
+    const tri=(a,b,c)=>{   /* wind every triangle outwards (away from the crystal axis) so culling + shadows are right */
+      const ux=b[0]-a[0],uy=b[1]-a[1],uz=b[2]-a[2],vx=c[0]-a[0],vy=c[1]-a[1],vz=c[2]-a[2];
+      const nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;
+      const out=nx*((a[0]+b[0]+c[0])/3-ctr[0])+ny*((a[1]+b[1]+c[1])/3-ctr[1])+nz*((a[2]+b[2]+c[2])/3-ctr[2])>0;
+      const t=out?[a,b,c]:[a,c,b];for(const v of t)pos.push(v[0],v[1],v[2]);face.push(fid,fid,fid);hnA.push(hn,hn,hn);idA.push(id,id,id)};
+    for(let i=0;i<n;i++){const j=(i+1)%n;tri(bot[i],bot[j],sh[j]);tri(bot[i],sh[j],sh[i]);fid++}   /* side facet = 2 tris, one face id */
+    for(let i=0;i<n;i++){const j=(i+1)%n;tri(sh[i],sh[j],apex);fid++}                                /* pointed terminus */
+  }
+  addCrystal(0,0,.32,-.5,.5,.10,.02,-.01,.2,.15,-.10,0,0);   /* main pillar, unit-box y (hn = 0 tells the shader not to remap it) */
+  CRYSTAL_SIDE.forEach((c,i)=>{const ang=i*2.4+1,cx=Math.cos(ang),cz=Math.sin(ang);
+    addCrystal(cx*c.d,cz*c.d,c.r,0,c.hn,Math.min(.45,c.r*3/c.hn),cx*c.l,cz*c.l,ang,.1*cx,.1*cz,c.hn,i+1)});   /* y in metres */
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('aFace',new THREE.Float32BufferAttribute(face,1));g.setAttribute('aHn',new THREE.Float32BufferAttribute(hnA,1));g.setAttribute('aId',new THREE.Float32BufferAttribute(idA,1));g.computeVertexNormals();return g
+}
+const crystalGeo=makeCrystalGeo();
+/* shared by the colour pass and the shadow pass so shadows match the shape */
+const CRYSTAL_ATTR='attribute float aHn;attribute float aId;';
+const CRYSTAL_VTX=`
+float sd=fract(sin(dot(instanceMatrix[3].xz,vec2(12.9898,78.233)))*43758.5453);
+float ca=cos(sd*6.2832),sa=sin(sd*6.2832);
+transformed.xz=vec2(ca*position.x-sa*position.z,sa*position.x+ca*position.z);
+if(aHn>0.){
+  float sy=length(instanceMatrix[1].xyz);
+  float m=.35+1.15*fract(sin(sd*91.7+aId*12.9898)*43758.5453);
+  float f=min(m,.7*sy/aHn);
+  transformed.y=-.5+position.y*f/sy;
+  if(aId>1.5&&fract(sin(sd*57.3+aId*7.1)*43758.5453)<.4)transformed=vec3(0.,-.5,0.);   /* drop crystal #2 on ~40% of obstacles (collapsed to a point) */
+}`;
+const crystalUniforms={uTime:{value:0},uRM:{value:1}},crystalT0=performance.now();
+const crystalMat=new THREE.MeshStandardMaterial({color:'#ffffff',roughness:.16,metalness:.1,flatShading:true,transparent:true,opacity:0});
+crystalMat.onBeforeCompile=sh=>{
+  sh.uniforms.uTime=crystalUniforms.uTime;sh.uniforms.uRM=crystalUniforms.uRM;
+  sh.vertexShader=sh.vertexShader
+    .replace('#include <common>','#include <common>\nattribute float aSpark;attribute float aFace;varying float vSpark;varying float vFace;varying float vSeed;'+CRYSTAL_ATTR)
+    .replace('#include <begin_vertex>','#include <begin_vertex>'+CRYSTAL_VTX+'\nvSpark=aSpark;vFace=aFace;vSeed=sd;');
+  sh.fragmentShader=sh.fragmentShader
+    .replace('#include <common>','#include <common>\nuniform float uTime;uniform float uRM;varying float vSpark;varying float vFace;varying float vSeed;')
+    .replace('#include <emissivemap_fragment>',`#include <emissivemap_fragment>
+{
+  float ndv=clamp(abs(dot(normalize(normal),normalize(vViewPosition))),0.,1.);
+  float fres=pow(1.-ndv,2.2);
+  float fp=vFace*2.399+vSeed*6.2832;
+  float fast=.5+.5*sin(uTime*22.+fp*1.7);                                 /* fast shimmer while a pulse is about to move */
+  float gl=vSpark*(.3+.7*fast)*1.5*uRM;                                   /* shimmer ONLY while vSpark>0 (just before sinking / rising) */
+  vec3 iri=.5+.5*cos(6.2832*(vec3(0.,.33,.67)+ndv*.8+vFace*.09)); /* prismatic rainbow on the facet edges */
+  totalEmissiveRadiance+=diffuseColor.rgb*(.55+fres*.6+vSpark*.45)+iri*fres*.28+vec3(1.)*gl*.6+diffuseColor.rgb*gl*.9;
+}`)
+};
+crystalMat.customProgramCacheKey=()=>'ff-crystal-v3';
+const crystalDepthMat=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking});   /* shadow pass needs the same vertex remap */
+crystalDepthMat.onBeforeCompile=sh=>{sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\n'+CRYSTAL_ATTR).replace('#include <begin_vertex>','#include <begin_vertex>'+CRYSTAL_VTX)};
+crystalDepthMat.customProgramCacheKey=()=>'ff-crystal-depth-v3';
+function crystalTick(){crystalUniforms.uTime.value=(performance.now()-crystalT0)*.001;crystalUniforms.uRM.value=state.reduced?.35:1}
+/* hue by position: low-frequency noise picks a spot on the hue ramp, so same-coloured crystals grow in patches that blend into their neighbours */
+function crystalColorAt(x,z){
+  const nB=CRYSTAL_COLORS.length-1;
+  let n=noise2(x*.045+40,z*.045-17)*.7+noise2(x*.11-9,z*.11+3)*.3;
+  n=clampN((n-.3)/.4+(hash2(x*.91+5,z*.77+1)-.5)*.12,0,.9999)*nB;
+  const i=Math.floor(n),f=THREE.MathUtils.smoothstep(n-i,.35,.65);
+  return CRYSTAL_COLORS[i].clone().lerp(CRYSTAL_COLORS[i+1],f)
+}
+const crystalM4=new THREE.Matrix4();
 const colorDummy=new THREE.Color(),WHITE=new THREE.Color('#ffffff'),GLOWC=new THREE.Color();
 function hash2(x,z){let n=Math.sin(x*127.1+z*311.7+19.19)*43758.5453;return n-Math.floor(n)}
 function noise2(x,z){let ix=Math.floor(x),iz=Math.floor(z),fx=x-ix,fz=z-iz;fx=fx*fx*(3-2*fx);fz=fz*fz*(3-2*fz);let a=hash2(ix,iz),b=hash2(ix+1,iz),c=hash2(ix,iz+1),d=hash2(ix+1,iz+1);return (a+(b-a)*fx)+((c+(d-c)*fx)-(a+(b-a)*fx))*fz}
@@ -299,6 +384,10 @@ function setChunkInstance(chunk,r){
   const safeH=Math.max(.004,r.h),d=chunk.dummy,s=chunk.spikeDummy;
   d.position.set(r.localX+r.offsetX,r.gh+safeH*.5-.08,r.localZ+r.offsetZ);d.scale.set(r.width,safeH,r.depth);d.updateMatrix();chunk.boxMesh.setMatrixAt(r.slot,d.matrix);
   s.position.copy(d.position);s.scale.set(r.width/2,safeH,r.depth/2);s.updateMatrix();chunk.spikeMesh.setMatrixAt(r.slot,s.matrix);
+  const cm=chunk.crystalMesh;
+  if(!r.cc){r.cc=crystalColorAt(r.sourceX,r.sourceZ);r.wf=.8+.4*hash2(r.sourceX*1.37+11.3,r.sourceZ*.89+2.7)}   /* wf = per-crystal width variation */
+  crystalM4.copy(d.matrix);crystalM4.elements[0]*=r.wf;crystalM4.elements[10]*=r.wf;cm.setMatrixAt(r.slot,crystalM4);
+  cm.setColorAt(r.slot,r.cc);cm.geometry.attributes.aSpark.array[r.slot]=r.spark||0;
   const col=r.glow>.001?GLOWC.copy(r.color).lerp(WHITE,r.glow):r.color;   /* glow = telegraph tint for pulsing / blinking obstacles */
   chunk.boxMesh.setColorAt(r.slot,col);chunk.spikeMesh.setColorAt(r.slot,col)
 }
@@ -316,7 +405,10 @@ function dynRecord(ch,r,wd,init){
     else if(ph<.62)rise=1-(1-LOW)*smooth01((ph-.5)/.12);
     else if(ph<.85)rise=LOW;
     else{rise=LOW;glow=(ph-.85)/.15*.9}
-    r.rise=rise;r.glow=glow;r.h=r.baseH*rise
+    r.rise=rise;r.glow=glow;r.h=r.baseH*rise;
+    /* crystal sparkle telegraph: shimmers while rising, ramps up (.30-.5) before sinking, fades as it sinks, quiet while down, ramps up again (.74-1) before rising */
+    let sp;if(ph<.1)sp=1-ph/.1;else if(ph<.30)sp=0;else if(ph<.46)sp=smooth01((ph-.30)/.12);else if(ph<.5)sp=1;else if(ph<.62)sp=1-(ph-.5)/.12;else if(ph<.74)sp=0;else sp=smooth01((ph-.74)/.16);
+    r.spark=sp
   }
   if(r.blink&&!r.riser){
     /* ghost = low glowing pad (harmless), solid = full block. state only flips while the block is 18+ m ahead, so nothing pops in under the plane */
@@ -333,13 +425,17 @@ function updateDynamics(wd){
     touchChunk(ch,col)
   }
 }
-function touchChunk(ch,colors){ch.boxMesh.instanceMatrix.needsUpdate=true;ch.spikeMesh.instanceMatrix.needsUpdate=true;if(colors){if(ch.boxMesh.instanceColor)ch.boxMesh.instanceColor.needsUpdate=true;if(ch.spikeMesh.instanceColor)ch.spikeMesh.instanceColor.needsUpdate=true}}
+function touchChunk(ch,colors,force){
+  ch.boxMesh.instanceMatrix.needsUpdate=true;ch.spikeMesh.instanceMatrix.needsUpdate=true;
+  if(colors){if(ch.boxMesh.instanceColor)ch.boxMesh.instanceColor.needsUpdate=true;if(ch.spikeMesh.instanceColor)ch.spikeMesh.instanceColor.needsUpdate=true}
+  const cm=ch.crystalMesh;if(cm.visible||force){cm.instanceMatrix.needsUpdate=true;if(colors){if(cm.instanceColor)cm.instanceColor.needsUpdate=true;cm.geometry.attributes.aSpark.needsUpdate=true}}   /* crystal buffers only upload while visible */
+}
 
 let chunkBuildCount=0;
 function buildChunk(chunk,ix,iz){
   chunkBuildCount++;
   chunk.ix=ix;chunk.iz=iz;chunk.key=`${ix},${iz}`;chunk.centerX=ix*CHUNK;chunk.sourceZ=iz*CHUNK;
-  const z=chunk.sourceZ+state.worldZ;chunk.ground.position.set(chunk.centerX,0,z);chunk.boxMesh.position.set(chunk.centerX,0,z);chunk.spikeMesh.position.copy(chunk.boxMesh.position);
+  const z=chunk.sourceZ+state.worldZ;chunk.ground.position.set(chunk.centerX,0,z);chunk.boxMesh.position.set(chunk.centerX,0,z);chunk.spikeMesh.position.copy(chunk.boxMesh.position);chunk.crystalMesh.position.copy(chunk.boxMesh.position);
   chunk.records=[];chunk.anim=[];chunk.dyn=[];
   const diff=Math.max(0,(state.distance-state.levelStart)/CONFIG.levelMeters),transitioning=state.fromLevel!==state.toLevel&&state.transition<1,from=transitioning?state.fromLevel:state.level,to=state.level,t=THREE.MathUtils.smoothstep(state.transition,0,1);
   let slot=0;
@@ -356,25 +452,29 @@ function buildChunk(chunk,ix,iz){
       chunk.records.push(r);if(r.riser)chunk.anim.push(r);if(r.mv||r.pulse||r.blink||r.orb){chunk.dyn.push(r);dynRecord(chunk,r,0,true)}setChunkInstance(chunk,r)
     }
   }
-  chunk.boxMesh.count=slot;chunk.spikeMesh.count=slot;
-  chunk.ground.instanceMatrix.needsUpdate=true;if(chunk.ground.instanceColor)chunk.ground.instanceColor.needsUpdate=true;touchChunk(chunk,true);
-  chunk.ready=true;chunk.ground.visible=true;chunk.boxMesh.visible=boxObstacleMat.opacity>.015;chunk.spikeMesh.visible=spikeObstacleMat.opacity>.015
+  chunk.boxMesh.count=slot;chunk.spikeMesh.count=slot;chunk.crystalMesh.count=slot;
+  chunk.ground.instanceMatrix.needsUpdate=true;if(chunk.ground.instanceColor)chunk.ground.instanceColor.needsUpdate=true;touchChunk(chunk,true,true);
+  chunk.ready=true;chunk.ground.visible=true;chunk.boxMesh.visible=boxObstacleMat.opacity>.015;chunk.spikeMesh.visible=spikeObstacleMat.opacity>.015;chunk.crystalMesh.visible=crystalMat.opacity>.015
 }
 function createChunk(){
   const ground=new THREE.InstancedMesh(boxGeo,groundMat,cellTotal);ground.receiveShadow=true;ground.frustumCulled=false;
   const boxMesh=new THREE.InstancedMesh(boxGeo,boxObstacleMat,cellTotal),spikeMesh=new THREE.InstancedMesh(spikeGeo,spikeObstacleMat,cellTotal);
+  const cg=crystalGeo.clone();cg.setAttribute('aSpark',new THREE.InstancedBufferAttribute(new Float32Array(cellTotal),1).setUsage(THREE.DynamicDrawUsage));
+  const crystalMesh=new THREE.InstancedMesh(cg,crystalMat,cellTotal);crystalMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);crystalMesh.castShadow=crystalMesh.receiveShadow=true;crystalMesh.onBeforeRender=crystalTick;crystalMesh.customDepthMaterial=crystalDepthMat;
   boxMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);spikeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  boxMesh.castShadow=spikeMesh.castShadow=true;boxMesh.receiveShadow=spikeMesh.receiveShadow=true;boxMesh.frustumCulled=false;spikeMesh.frustumCulled=false;
-  ground.visible=boxMesh.visible=spikeMesh.visible=false;
-  const chunk={ground,boxMesh,spikeMesh,mesh:boxMesh,records:[],anim:[],dyn:[],ready:false,dummy:new THREE.Object3D(),spikeDummy:new THREE.Object3D(),groundDummy:new THREE.Object3D(),key:null,ix:0,iz:0,sourceZ:0,centerX:0};
-  scene.add(ground,boxMesh,spikeMesh);chunks.push(chunk)
+  boxMesh.castShadow=spikeMesh.castShadow=true;boxMesh.receiveShadow=spikeMesh.receiveShadow=true;boxMesh.frustumCulled=false;spikeMesh.frustumCulled=false;crystalMesh.frustumCulled=false;
+  ground.visible=boxMesh.visible=spikeMesh.visible=crystalMesh.visible=false;
+  /* real per-chunk bounds so three.js can skip off-screen chunks (also in the shadow pass). InstancedMesh defaults to unusable bounds, hence culling was off */
+  for(const m of [ground,boxMesh,spikeMesh,crystalMesh])if('boundingSphere' in m){m.boundingSphere=new THREE.Sphere(new THREE.Vector3(0,20,0),50);m.frustumCulled=true}
+  const chunk={ground,boxMesh,spikeMesh,crystalMesh,mesh:boxMesh,records:[],anim:[],dyn:[],ready:false,dummy:new THREE.Object3D(),spikeDummy:new THREE.Object3D(),groundDummy:new THREE.Object3D(),key:null,ix:0,iz:0,sourceZ:0,centerX:0};
+  scene.add(ground,boxMesh,spikeMesh,crystalMesh);chunks.push(chunk)
 }
 for(let i=0;i<CONFIG.chunksX*(CONFIG.chunksAhead+CONFIG.chunksBehind+1);i++)createChunk();
 
 /* ---- smooth streaming: new chunks are queued and built a little each frame, nearest-ahead first ---- */
 const buildQueue=[];
 const chunkPriority=ch=>{const dz=state.cz-ch.iz;return (dz>=0?dz:8-dz)*10+Math.abs(ch.ix-state.cx)};
-function releaseChunk(ch){ch.key=null;ch.ready=false;ch.ground.visible=ch.boxMesh.visible=ch.spikeMesh.visible=false;ch.records=[];ch.anim=[];ch.dyn=[]}
+function releaseChunk(ch){ch.key=null;ch.ready=false;ch.ground.visible=ch.boxMesh.visible=ch.spikeMesh.visible=ch.crystalMesh.visible=false;ch.records=[];ch.anim=[];ch.dyn=[]}
 function streamChunks(force=false){
   const cx=Math.round(state.x/CHUNK),cz=Math.round(-state.worldZ/CHUNK),halfX=(CONFIG.chunksX-1)/2,wanted=[];
   state.cx=cx;state.cz=cz;
@@ -383,7 +483,7 @@ function streamChunks(force=false){
   const keys=new Set(wanted.map(w=>w.key)),have=new Set(),free=[];
   for(const ch of chunks){if(ch.key&&keys.has(ch.key))have.add(ch.key);else{if(ch.key){const qi=buildQueue.indexOf(ch);if(qi>=0)buildQueue.splice(qi,1);releaseChunk(ch)}free.push(ch)}}
   let f=0;for(const w of wanted){if(have.has(w.key))continue;const ch=free[f++];if(!ch)break;ch.key=w.key;ch.ix=w.ix;ch.iz=w.iz;ch.ready=false;buildQueue.push(ch)}
-  for(const ch of chunks)if(ch.ready){const z=ch.sourceZ+state.worldZ;ch.ground.position.z=z;ch.boxMesh.position.z=z;ch.spikeMesh.position.z=z}
+  for(const ch of chunks)if(ch.ready){const z=ch.sourceZ+state.worldZ;ch.ground.position.z=z;ch.boxMesh.position.z=z;ch.spikeMesh.position.z=z;ch.crystalMesh.position.z=z}
 }
 function pumpBuildQueue(){
   if(!buildQueue.length||state.hideWorld)return;const t0=performance.now();
@@ -428,9 +528,16 @@ function updateRisers(){
   }
 }
 function applyObstacleStyle(){
-  const t=THREE.MathUtils.smoothstep(state.transition,0,1),spikeWeight=(LEVELS[state.fromLevel].spikes?1-t:0)+(LEVELS[state.toLevel].spikes?t:0);
-  state.spikeWeight=spikeWeight;boxObstacleMat.opacity=1-spikeWeight;spikeObstacleMat.opacity=spikeWeight;boxObstacleMat.depthWrite=spikeWeight<.01;spikeObstacleMat.depthWrite=spikeWeight>.99;
-  for(const ch of chunks){const show=!state.hideWorld&&state.mode!=='SHOP'&&ch.ready;ch.boxMesh.visible=show&&boxObstacleMat.opacity>.015;ch.spikeMesh.visible=show&&spikeObstacleMat.opacity>.015}
+  const t=THREE.MathUtils.smoothstep(state.transition,0,1),spikeWeight=(LEVELS[state.fromLevel].spikes?1-t:0)+(LEVELS[state.toLevel].spikes?t:0),crystalWeight=(LEVELS[state.fromLevel].crystals?1-t:0)+(LEVELS[state.toLevel].crystals?t:0);
+  state.spikeWeight=spikeWeight;state.crystalWeight=crystalWeight;
+  const solid=Math.min(1,spikeWeight+crystalWeight);
+  boxObstacleMat.opacity=1-solid;spikeObstacleMat.opacity=spikeWeight;crystalMat.opacity=crystalWeight;boxObstacleMat.depthWrite=solid<.01;spikeObstacleMat.depthWrite=spikeWeight>.99;crystalMat.depthWrite=crystalWeight>.99;
+  for(const ch of chunks){
+    const show=!state.hideWorld&&state.mode!=='SHOP'&&ch.ready;ch.boxMesh.visible=show&&boxObstacleMat.opacity>.015;ch.spikeMesh.visible=show&&spikeObstacleMat.opacity>.015;
+    const cv=show&&crystalMat.opacity>.015;
+    if(cv&&!ch.crystalMesh.visible){const cm=ch.crystalMesh;cm.instanceMatrix.needsUpdate=true;if(cm.instanceColor)cm.instanceColor.needsUpdate=true;cm.geometry.attributes.aSpark.needsUpdate=true}   /* buffers were skipped while hidden: re-upload when it fades in */
+    ch.crystalMesh.visible=cv
+  }
 }
 resetField();streamChunks(true);
 /* PLANE */
@@ -917,7 +1024,7 @@ const arenaTex=(()=>{const c=document.createElement('canvas');c.width=c.height=2
 const arenaGround=new THREE.Mesh(new THREE.PlaneGeometry(ARENA_SIZE,ARENA_SIZE),new THREE.MeshBasicMaterial({map:arenaTex,fog:true}));arenaGround.rotation.x=-Math.PI/2;arenaGround.visible=false;arenaGround.frustumCulled=false;scene.add(arenaGround);
 const AC={h0:new THREE.Color('#34100f'),h1:new THREE.Color('#7a1424'),t0:new THREE.Color('#0a0408'),t1:new THREE.Color('#1e0614'),f0:new THREE.Color('#1c0809'),f1:new THREE.Color('#33091a'),hemi:new THREE.Color('#ffb08a'),hemiG:new THREE.Color('#200808'),sun:new THREE.Color('#ff9a6a'),amb:new THREE.Color('#ff7a4a')};
 
-function setWorldVisible(v){for(const ch of chunks){const on=!!v&&ch.ready;ch.ground.visible=on;ch.boxMesh.visible=on&&boxObstacleMat.opacity>.015;ch.spikeMesh.visible=on&&spikeObstacleMat.opacity>.015}}
+function setWorldVisible(v){for(const ch of chunks){const on=!!v&&ch.ready;ch.ground.visible=on;ch.boxMesh.visible=on&&boxObstacleMat.opacity>.015;ch.spikeMesh.visible=on&&spikeObstacleMat.opacity>.015;ch.crystalMesh.visible=on&&crystalMat.opacity>.015}}
 function arenaOff(){
   state.arena=false;state.hideWorld=false;state.arn=null;ARENA_RULE.gust=null;
   arenaGround.visible=false;ambient.visible=true;skyDome.rotation.set(0,0,0);blackHole.visible=false;
@@ -1194,8 +1301,8 @@ function setShopTab(tab){if(state.shopTab===tab)return;state.shopTab=tab;if(tab=
 function renderPlaneDetails(){const p=PLANES[state.selectedPlane],owned=ownedPlane(state.selectedPlane),equipped=save.equippedPlane===state.selectedPlane,due=Math.max(0,p.price-save.credits);details.innerHTML=`<h2 class="hangar-title">${p.name}</h2><div class="micro">${p.type} · FLIGHT ${String(state.selectedPlane+1).padStart(2,'0')}</div><p class="hangar-copy">${p.desc.replace('\n','<br>')}</p><div class="bar-row"><div class="bar-head"><span>HANDLING</span><span>${p.handling} / 10</span></div><div class="bar-track"><i style="width:${p.handling*10}%"></i></div></div><div class="bar-row"><div class="bar-head"><span>VISIBILITY</span><span>${p.visibility} / 10</span></div><div class="bar-track"><i style="width:${p.visibility*10}%"></i></div></div><div class="shop-price">${owned?'READY TO FLY':`${money(p.price)} CREDITS`}</div><button id="planeAction" class="shop-action" ${equipped||(!owned&&due)?'disabled':''}>${equipped?'EQUIPPED':owned?'EQUIP':due?`NEED ${money(due)} MORE`:'BUY'}</button>`;document.getElementById('planeAction').addEventListener('click',()=>{if(owned){save.equippedPlane=state.selectedPlane;buildAircraft(save.equippedPlane);persistSave();renderShop();const a=document.getElementById('planeAction');a.textContent='✓ EQUIPPED';a.classList.add('success');setTimeout(renderShop,700)}else if(save.credits>=p.price){save.credits-=p.price;save.ownedPlanes.push(state.selectedPlane);save.equippedPlane=state.selectedPlane;buildAircraft(save.equippedPlane);persistSave();state.hangarPulse=1;renderShop();const a=document.getElementById('planeAction');a.textContent='✓ PURCHASED';a.classList.add('success');setTimeout(renderShop,850)}})}
 function renderAbilityDetails(){const sec=v=>`${v.toFixed(1)} s`;details.innerHTML=`<h2 class="hangar-title">Abilities</h2><p class="hangar-copy">Trigger them mid-flight. Each upgrade lasts longer and recharges faster.</p>`+Object.entries(ABILITIES).map(([key,a])=>{const meta=ABILITY_META[key]||{key:'',icon:''},level=save.abilities[key],cur=level?a.levels[level]:null,next=level<3?a.levels[level+1]:null,price=level<3?a.prices[level]:0,due=Math.max(0,price-save.credits),label=level===0?'UNLOCK':'UPGRADE',durNow=cur?sec(cur.duration):'—',coolNow=cur?`${cur.cooldown} s`:'—',durDelta=next&&cur?`<em>→ ${sec(next.duration)}</em>`:next?`<em>${sec(next.duration)}</em>`:'',coolDelta=next&&cur?`<em>→ ${next.cooldown} s</em>`:next?`<em>${next.cooldown} s</em>`:'';return `<article class="ab-card${level?' owned':''}"><div class="ab-top"><div class="ab-badge">${meta.icon}</div><div><div class="ab-name">${a.name}</div><span class="ab-key">KEY ${meta.key}</span></div><span class="ab-level">${level?`LEVEL ${level} / 3`:'LOCKED'}</span></div><p class="ab-desc">${a.desc}</p><div class="ab-stats"><div class="ab-stat"><label>DURATION</label><b>${durNow}</b>${durDelta}</div><div class="ab-stat"><label>COOLDOWN</label><b>${coolNow}</b>${coolDelta}</div></div><div class="pips">${[1,2,3].map(n=>`<i class="${n<=level?'on':''}"></i>`).join('')}</div><button class="shop-action ability-buy" data-ability="${key}" ${level>=3||due?'disabled':''}>${level>=3?'MAX LEVEL':due?`NEED ${money(due)} MORE`:`${label} · ${money(price)} ◈`}</button></article>`}).join('');details.querySelectorAll('.ability-buy').forEach(b=>b.addEventListener('click',()=>{const k=b.dataset.ability,a=ABILITIES[k],lv=save.abilities[k];if(lv>=3||save.credits<a.prices[lv])return;save.credits-=a.prices[lv];save.abilities[k]++;persistSave();renderShop();const done=details.querySelector(`[data-ability="${k}"]`);if(done){done.textContent='✓ UPGRADED';done.classList.add('success');setTimeout(renderShop,750)}renderAbilityHud()}))}
 function selectPlane(i){state.selectedPlane=(i+PLANES.length)%PLANES.length;buildAircraft(state.selectedPlane);renderShop()}
-function openShop(){if(state.mode!=='HOME')return;state.mode='SHOP';state.selectedPlane=save.equippedPlane;buildAircraft(state.selectedPlane);for(const ch of chunks)ch.ground.visible=ch.boxMesh.visible=ch.spikeMesh.visible=false;clearMeteors();ambient.visible=false;moon.visible=false;for(const t of trailLines)t.line.visible=false;plane.visible=true;plane.position.set(0,3.1,-3);plane.rotation.set(0,0,0);renderShop();home.classList.remove('active');hud.classList.remove('visible');shopScreen.classList.add('active')}
-function closeShop(){if(state.mode!=='SHOP')return;shopScreen.classList.remove('active');buildAircraft(save.equippedPlane);state.mode='HOME';shieldBubble.visible=false;shieldBubble.rotation.y=0;plane.position.set(state.x,3.6,0);plane.rotation.set(0,0,0);plane.visible=true;for(const ch of chunks)if(ch.ready){ch.ground.visible=true;ch.boxMesh.visible=boxObstacleMat.opacity>.015;ch.spikeMesh.visible=spikeObstacleMat.opacity>.015}ambient.visible=true;moon.visible=true;for(const t of trailLines)t.line.visible=true;home.classList.add('active')}
+function openShop(){if(state.mode!=='HOME')return;state.mode='SHOP';state.selectedPlane=save.equippedPlane;buildAircraft(state.selectedPlane);for(const ch of chunks)ch.ground.visible=ch.boxMesh.visible=ch.spikeMesh.visible=ch.crystalMesh.visible=false;clearMeteors();ambient.visible=false;moon.visible=false;for(const t of trailLines)t.line.visible=false;plane.visible=true;plane.position.set(0,3.1,-3);plane.rotation.set(0,0,0);renderShop();home.classList.remove('active');hud.classList.remove('visible');shopScreen.classList.add('active')}
+function closeShop(){if(state.mode!=='SHOP')return;shopScreen.classList.remove('active');buildAircraft(save.equippedPlane);state.mode='HOME';shieldBubble.visible=false;shieldBubble.rotation.y=0;plane.position.set(state.x,3.6,0);plane.rotation.set(0,0,0);plane.visible=true;for(const ch of chunks)if(ch.ready){ch.ground.visible=true;ch.boxMesh.visible=boxObstacleMat.opacity>.015;ch.spikeMesh.visible=spikeObstacleMat.opacity>.015;ch.crystalMesh.visible=crystalMat.opacity>.015}ambient.visible=true;moon.visible=true;for(const t of trailLines)t.line.visible=true;home.classList.add('active')}
 document.getElementById('homeShop').addEventListener('click',openShop);document.getElementById('hangarBack').addEventListener('click',closeShop);planesTabBtn.addEventListener('click',()=>setShopTab('hangar'));abilitiesTabBtn.addEventListener('click',()=>setShopTab('abilities'));
 function animateNumber(el,to,duration=1200,prefix=''){const from=0,start=performance.now();const tick=now=>{const t=clampN((now-start)/duration,0,1),e=1-Math.pow(1-t,3);el.textContent=`${prefix}${money(to*e)}`;if(t<1)requestAnimationFrame(tick)};requestAnimationFrame(tick)}
 function accountCrash(){const d=Math.floor(state.arena?state.arenaD0:state.distance),dist=runCredits(d),lvl=Array.from({length:state.levelsReached},(_,i)=>levelBonus(i+1)).reduce((a,b)=>a+b,0)+(state.levelsReached>=PERP_IDX?ECONOMY.perplexBonus:0)+(state.arenaDone?ECONOMY.arenaBonus:0),distDue=Math.max(0,dist-(state.paidRunDistance||0)),levelDue=Math.max(0,lvl-(state.paidRunLevel||0));const before=save.lifetimeMeters,added=Math.max(0,d-(state.lifetimeAccountedDistance||0));save.lifetimeMeters+=added;state.lifetimeAccountedDistance=d;let milestone=0;const candidates=[...ECONOMY.milestones.map((m,i)=>({meters:m.meters,bonus:m.bonus,id:i}))];for(let k=1;k<1000;k++)candidates.push({meters:ECONOMY.milestones[5].meters+k*ECONOMY.repeatEvery,bonus:ECONOMY.repeatBonus,id:5+k});for(const m of candidates){if(m.meters>before&&m.meters<=save.lifetimeMeters&&!save.milestonesClaimed.includes(m.id)){milestone+=m.bonus;save.milestonesClaimed.push(m.id)}}const runDue=distDue+levelDue;state.paidThisRun+=runDue;state.paidRunDistance=dist;state.paidRunLevel=lvl;const total=runDue+milestone;save.credits+=total;persistSave();return {dist:distDue,levels:levelDue,milestone,total,hasMilestone:milestone>0}}

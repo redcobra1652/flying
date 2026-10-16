@@ -37,8 +37,8 @@ initSettingsUI();
 let musicTargetTempo=110,musTheme='idle',musProg=0,musNext=0;
 const MUSIC_MAPS=14;
 const MUS={buses:{},comp:null,compC:null,ir:null,irC:null,shape:{},cur:null};
-const MUS_TRIM={idle:.95,flight:1,perplexity:1.05,horizon:1};
-const MUS_TEMPO={idle:72,perplexity:168,horizon:108};
+const MUS_TRIM={idle:.95,flight:1,perplexity:1.05,horizon:1.04};
+const MUS_TEMPO={idle:72,perplexity:168,horizon:136};
 function midiHz(n){return 440*Math.pow(2,(n-69)/12)}
 /* ---------- bus / routing ---------- */
 function musOut(){const c=audioCtx;if(MUS.comp&&MUS.compC===c)return MUS.comp;const k=c.createDynamicsCompressor();k.threshold.value=-20;k.knee.value=10;k.ratio.value=3.5;k.attack.value=.006;k.release.value=.2;k.connect(audioMusicFilter);MUS.comp=k;MUS.compC=c;return k}
@@ -85,7 +85,7 @@ function musDist(freq,t,dur,vol,k,cut,wet){const c=audioCtx,o=c.createOscillator
   o.connect(ws);ws.connect(lp);lp.connect(g);sub.connect(sg);sg.connect(g);musWire(g,wet||0);o.start(t);sub.start(t);o.stop(t+dur+.03);sub.stop(t+dur+.03)}
 /* ---------- progress through the 14 maps (0..1), smoothed by the flight scheduler ---------- */
 function musProgTarget(){const L=Number.isFinite(state.level)?state.level:0,lm=(typeof CONFIG!=='undefined'&&CONFIG.levelMeters)||1000,fr=Number.isFinite(state.distance)&&Number.isFinite(state.levelStart)?clampN((state.distance-state.levelStart)/lm,0,1):0;return clampN((L+fr)/MUSIC_MAPS,0,1)}
-function musTempoFor(theme){return theme==='flight'?104+36*musProgTarget():(MUS_TEMPO[theme]||110)}
+function musTempoFor(theme){return theme==='flight'?104+38*flightQ(musProgTarget()):(MUS_TEMPO[theme]||110)}
 function musStepDur(){const sc=(musTheme!=='idle'&&state.mode==='PLAYING')?Math.max(.52,state.worldScale):1;return 60/(musicTargetTempo*sc)/4}
 
 /* ================= IDLE: slow ambient (Am9 - Fmaj7 - Cmaj7 - G6, two bars each). pads, sub, sparse reverberant plucks, bells, wind ================= */
@@ -101,34 +101,70 @@ function stepIdle(t,sd){
   if(s===8&&(bar&3)===2)musBell(midiHz(ch.arp[5]+12),t,3,.016,.9)}
 
 /* ================= FLIGHT: the base theme, evolving over all 14 maps =================
-   progress p = (map index + fraction of the map) / 14, smoothed. Layers fade in gradually (L(a,b) = 0..1 ramp between p=a and p=b):
-   0.00 kick, root/fifth bass, pad, hook   |  .10-.28 off-beat hats  |  .12-.34 off-beat bass  |  .12 octave hook, .34 form grows to 8 bars (second half = new melody, Dm/E turnaround)
-   .28-.48 backbeat snare  |  .38-.58 16th arpeggio  |  .45 open hats  |  .55-.8 supersaw pad, detuned lead, risers, crash  |  .6-.82 driving 16th bass  |  tempo 104 -> 140 */
-/* the original hook + chord loop (maps 1-4 of the form) */
+   progress p = (map index + fraction of the map) / 14, smoothed, then bent into q = p^0.7 so the build starts early:
+   map 2 is already q~.16-.26, map 4 ~.34-.42, map 7 ~.55-.62, map 10 ~.74-.79, map 14 = 1.
+   Layers fade in gradually (L(a,b) = 0..1 ramp between q=a and q=b):
+   map 1   kick, root/fifth bass, chord pad, hook
+   map 2   .16-.30 off-beat hats | .17-.34 off-beat bass | .18 octave hook | .18-.40 air pad | .28-.50 hook echo (dotted delay)
+   map 3   .26 form grows to 8 bars (second half = new melody, Dm/E turnaround) | .26-.45 counter-melody | .30 hat rolls + fills every 4th bar
+   map 4-5 .30-.44 backbeat snare | .34-.50 16th arpeggio (3 shapes, rotates each bar) | .38 open hats | .42-.60 16th shaker
+   map 6-7 .46-.62 supersaw pad | .50-.70 detuned lead | .50-.68 driving 16th bass | .5-.7 ghost kicks | risers, crash
+   map 8   .62 form grows to 16 bars (third melody + new chords F G Am Am | F G C E), section crash + boom | .55-.75 off-beat stabs
+   map 9+  .62-.82 parallel-fifth lead harmony | .70-.90 octave bass pump + upper 16th shimmer arp | .7 hard downbeat kick | .8 full 16th hats | tom fills
+   tempo 104 -> 142 (also bent, so it speeds up sooner) */
 const FLIGHT_MELODY=[57,60,60,64,67,64,60,57, 57,60,65,65,69,65,60,57, 55,60,60,64,67,64,60,55, 55,59,62,67,67,62,59,55];
 const FLIGHT_CHORDS=[{root:45,third:3,fifth:7},{root:41,third:4,fifth:7},{root:48,third:4,fifth:7},{root:43,third:4,fifth:7}];
 const FLIGHT_MELODY_B=[64,64,67,69,72,69,67,64, 65,65,69,72,72,69,65,60, 62,65,69,69,74,69,65,62, 64,68,71,76,71,68,64,59];
+/* third melody (maps 8-14): higher, wider leaps. chords F G Am Am | F G C E */
+const FLIGHT_MELODY_C=[65,69,72,77,72,69,72,69, 67,71,74,79,74,71,74,71, 69,72,76,81,76,72,76,72, 69,72,76,79,81,79,76,72, 77,77,72,72,69,72,77,81, 79,79,74,74,71,74,79,83, 84,81,79,76,79,76,72,76, 76,80,83,88,83,80,76,71];
 const FLIGHT_CHORDS8=[...FLIGHT_CHORDS,{root:45,third:3,fifth:7},{root:41,third:4,fifth:7},{root:50,third:3,fifth:7},{root:52,third:4,fifth:7}];
+const FLIGHT_CHORDS16=[...FLIGHT_CHORDS8,{root:41,third:4,fifth:7},{root:43,third:4,fifth:7},{root:45,third:3,fifth:7},{root:45,third:3,fifth:7},{root:41,third:4,fifth:7},{root:43,third:4,fifth:7},{root:48,third:4,fifth:7},{root:52,third:4,fifth:7}];
+let flightN=4;
+function flightQ(p){return Math.pow(clampN(p,0,1),.7)}
 function stepFlight(t,sd){
   musProg+=(musProgTarget()-musProg)*.035;
-  const p=musProg,L=(a,b)=>clampN((p-a)/(b-a),0,1),n8=p>=.34?8:4,bar=(musicStep>>4)%n8,s=musicStep&15,beat=s>>2,chord=FLIGHT_CHORDS8[bar],bd=16*sd;
-  if(s%4===0){musicKick(t,.1+.07*L(0,.45)+.03*p);const bass=midiHz(chord.root-12+(beat%2?7:0));synthNote(bass,t,sd*2.3,.07+.02*p,'triangle',undefined,420);synthNote(bass*2,t,sd*1.8,.016+.01*p,'sawtooth',undefined,820)}
-  const ob=L(.12,.34);if(ob>0&&s%4===2)synthNote(midiHz(chord.root-12+(beat%2?0:7)),t,sd*1.6,.045*ob,'triangle',undefined,520);
-  const dr=L(.6,.82);if(dr>0&&s%2===1)synthNote(midiHz(chord.root-12+((s>>1)%2?12:0)),t,sd*1.2,.035*dr,'sawtooth',undefined,650);
-  const h=L(.1,.28);if(h>0&&s%4===2)musHat(t,.02*h);
-  if(p>.5&&s%2===1)musHat(t,.008*L(.5,.7));if(p>.45&&s===14)musHat(t,.018,true);
-  const sn=L(.28,.48);if(sn>0&&(s===4||s===12))musSnare(t,.05+.04*L(.28,.6),.15);
-  if(s===0){const pb=1+p*.5;synthNote(midiHz(chord.root+12),t,bd*.87,.018*pb,'triangle',undefined,1250);synthNote(midiHz(chord.root+12+chord.third),t,bd*.87,.014*pb,'triangle',undefined,1550);synthNote(midiHz(chord.root+19),t,bd*.87,.011*pb,'sawtooth',undefined,1950);
-    const sp=L(.55,.82);if(sp>0)for(const iv of [0,chord.third,7])musPad(midiHz(chord.root+24+iv),t,bd*.95,.009*sp,{wave:'sawtooth',att:.3,rel:.5,cut:1900,cut2:3200,det:9,wet:.3});
-    if(bar===0&&p>.5)musCrash(t,.03*L(.5,.8));
-    if(bar===n8-1&&p>.5)musNoise(t,bd,.02*L(.5,.8),{f0:500,f1:6000,q:.6,swell:true,wet:.15})}
-  if(bar===n8-1&&p>.6&&s>=12)musSnare(t,.025+.01*(s-12),.1);
-  if(s%2===0){const mi=(bar<4?FLIGHT_MELODY:FLIGHT_MELODY_B)[(bar&3)*8+(s>>1)],f=midiHz(mi);
-    synthNote(f,t,sd*1.8,.036+.012*p,'sawtooth',undefined,2200+1000*L(0,.4)+800*p);
-    if(p>.12&&s%8===0)synthNote(midiHz(mi+12),t,sd*1.6,.012+.02*p,'triangle',undefined,4300);
-    if(p>.5&&s%4===2)synthNote(midiHz(mi+12),t,sd*1.5,.009+.01*p,'triangle',undefined,4300);
-    const sh=L(.55,.8);if(sh>0)synthNote(f*1.008,t,sd*1.8,.018*sh,'sawtooth',undefined,2600)}
-  const ar=L(.38,.58);if(ar>0&&s%2===1)synthNote(midiHz(chord.root+24+[0,chord.third,chord.fifth,12][(s>>1)&3]),t,sd*1.5,.014*ar,'triangle',undefined,3000,.15)}
+  const p=musProg,q=flightQ(p),L=(a,b)=>clampN((q-a)/(b-a),0,1),s=musicStep&15;
+  /* the form only grows on a form boundary, so chords never jump mid-bar */
+  if(s===0){const want=q>=.62?16:q>=.26?8:4;if(musicStep===0)flightN=4;if(want>flightN&&((musicStep>>4)%want)===0)flightN=want}
+  const n=flightN,bar=(musicStep>>4)%n,beat=s>>2,chord=FLIGHT_CHORDS16[bar],bd=16*sd,b4=bar&3,last=bar===n-1,pend=last||(n===16&&bar===7);
+  /* ---- drums ---- */
+  if(s%4===0){musicKick(t,.1+.09*L(0,.5)+.03*q,q>.7&&s===0);const bass=midiHz(chord.root-12+(beat%2?7:0));synthNote(bass,t,sd*2.3,.07+.02*q,'triangle',undefined,420);synthNote(bass*2,t,sd*1.8,.016+.01*q,'sawtooth',undefined,820)}
+  const gk=L(.5,.7);if(gk>0&&((s===10&&(bar&1))||(s===14&&b4===3)))musicKick(t,.05*gk);
+  const h=L(.16,.3);if(h>0&&s%4===2)musHat(t,.02*h);
+  const sh16=L(.42,.6);if(sh16>0&&s%2===1)musHat(t,.008*sh16);
+  if(q>.38&&s===14)musHat(t,.018,true);
+  if(q>.5&&b4===3&&s>=12&&s%2===0)musHat(t,.012);
+  if(q>.8&&s%2===0)musHat(t,.007);
+  const sn=L(.3,.44);if(sn>0&&(s===4||s===12))musSnare(t,.05+.04*L(.3,.7),.15);
+  if(q>.6&&s===10&&b4===1)musSnare(t,.02,.1);
+  if(b4===3&&q>.34&&s>=14)musSnare(t,.02+.01*(s-14),.1);
+  if(last&&q>.45&&s>=8&&s%2===0)musSnare(t,.015+.004*(s-8),.1);
+  if(last&&q>.62&&s>=12)musTom(t,[210,180,150,120][s-12],.06,.2);
+  /* ---- bass ---- */
+  const ob=L(.17,.34);if(ob>0&&s%4===2)synthNote(midiHz(chord.root-12+(beat%2?0:7)),t,sd*1.6,.045*ob,'triangle',undefined,520);
+  const dr=L(.5,.68);if(dr>0&&s%2===1)synthNote(midiHz(chord.root-12+((s>>1)%2?12:0)),t,sd*1.2,.035*dr,'sawtooth',undefined,650);
+  const op=L(.7,.9);if(op>0&&s%4===2)synthNote(midiHz(chord.root),t,sd*1.2,.02*op,'square',undefined,900);
+  /* ---- chords / pads, once per bar ---- */
+  if(s===0){const pb=1+q*.5;synthNote(midiHz(chord.root+12),t,bd*.87,.018*pb,'triangle',undefined,1250);synthNote(midiHz(chord.root+12+chord.third),t,bd*.87,.014*pb,'triangle',undefined,1550);synthNote(midiHz(chord.root+19),t,bd*.87,.011*pb,'sawtooth',undefined,1950);
+    const wp=L(.18,.4);if(wp>0)musPad(midiHz(chord.root+19),t,bd,.008*wp,{wave:'triangle',att:.5,rel:.6,cut:1500,cut2:2600,det:6,wet:.6});
+    const sp=L(.46,.62);if(sp>0)for(const iv of [0,chord.third,7])musPad(midiHz(chord.root+24+iv),t,bd*.95,.009*sp,{wave:'sawtooth',att:.3,rel:.5,cut:1900,cut2:3200,det:9,wet:.3});
+    if(bar===0&&q>.45)musCrash(t,.03*L(.45,.7));
+    if(n===16&&bar===8){musCrash(t,.04,.4);musBoom(t,.1,.7)}
+    if(b4===3&&q>.3)musNoise(t,bd,(pend?.02:.01)*L(.3,.6),{f0:500,f1:6000,q:.6,swell:true,wet:.15});
+    if(pend&&q>.7)musT('sawtooth',t,bd,110,880,.02,{rise:true,lp:2400,wet:.2})}
+  const stb=L(.55,.75);if(stb>0&&(s===3||s===6||s===10)){for(const iv of [0,chord.third,7])synthNote(midiHz(chord.root+24+iv),t,sd*1.5,.012*stb,'sawtooth',undefined,2400,.15,.004,s===3?-7:7)}
+  /* ---- melody and everything that decorates it ---- */
+  if(s%2===0){const mb=bar<4?bar:bar<8?bar-4:bar-8,mi=(bar<4?FLIGHT_MELODY:bar<8?FLIGHT_MELODY_B:FLIGHT_MELODY_C)[mb*8+(s>>1)],f=midiHz(mi);
+    synthNote(f,t,sd*1.8,.036+.012*q,'sawtooth',undefined,2200+1000*L(0,.4)+800*q);
+    if(q>.18&&s%8===0)synthNote(midiHz(mi+12),t,sd*1.6,.012+.02*q,'triangle',undefined,4300);
+    if(q>.46&&s%4===2)synthNote(midiHz(mi+12),t,sd*1.5,.009+.01*q,'triangle',undefined,4300);
+    const sh=L(.5,.7);if(sh>0)synthNote(f*1.008,t,sd*1.8,.018*sh,'sawtooth',undefined,2600);
+    const ec=L(.28,.5);if(ec>0&&s%4===0)synthNote(f,t+sd*3,sd*1.6,.012*ec,'triangle',undefined,2800,.5,.01);
+    const hm=L(.62,.82);if(hm>0)synthNote(midiHz(mi+7),t,sd*1.8,.014*hm,'sawtooth',undefined,2600);
+    if(s===14&&q>.3&&(b4&1))synthNote(midiHz(mi+12),t+sd,sd*1.2,.016,'triangle',undefined,3500)}
+  const cm=L(.26,.45);if(cm>0&&(s===6||s===14))synthNote(midiHz(chord.root+24+[0,chord.third,7,12,chord.third+12,7][(bar*2+(s>>3))%6]),t,sd*3,.016*cm,'triangle',undefined,3400,.3);
+  const ar=L(.34,.5);if(ar>0&&s%2===1){const ap=b4===1?[12,chord.fifth,chord.third,0]:b4===2?[0,chord.fifth,12,chord.fifth]:[0,chord.third,chord.fifth,12];synthNote(midiHz(chord.root+24+ap[(s>>1)&3]),t,sd*1.5,.014*ar,'triangle',undefined,3000,.15)}
+  const a2=L(.7,.9);if(a2>0&&s%2===0){const ap=[0,chord.third,chord.fifth,12];synthNote(midiHz((chord.root%12)+72+ap[(s>>1)&3]),t,sd*1.2,.007*a2,'triangle',undefined,4200,.2)}}
 
 /* ================= PERPLEXITY: full boss. 168 bpm, 16-bar form (A = ostinato, B = lead motif). bass roots A A Bb A | A C B Bb ================= */
 const PERP_ROOTS=[33,33,34,33,33,36,35,34];
@@ -149,29 +185,47 @@ function stepPerp(t,sd){
   if(!sec&&s>=12){const f=midiHz(72+(s&3));synthNote(f,t,sd*1.4,.03,'square',undefined,3200,.1);synthNote(f*1.013,t,sd*1.4,.02,'sawtooth',undefined,3200)}
   if(sec){const ln=PERP_LEAD[bar][s];if(ln){const f=midiHz(ln);synthNote(f,t,sd*2.4,.045,'sawtooth',undefined,3800,.2);synthNote(f*1.013,t,sd*2.4,.03,'sawtooth',undefined,3400);synthNote(f*.5,t,sd*2.4,.02,'square',undefined,1400);if(bar>=4)synthNote(f*2,t,sd*2,.015,'triangle',undefined,4500)}}}
 
-/* ================= EVENT HORIZON: half-way boss. 108 bpm half-time pulse, Cm Cm Ab Bb | Cm Fm Db G.
-   The arpeggio each bar slows down note by note (time dilation), a gravity drone and accretion swells sit underneath, last bar falls into the well ================= */
+/* ================= EVENT HORIZON: half-way boss. 136 bpm, driving. Cm Cm Ab Bb | Cm Fm Db G.
+   It carries the flight hook (Am -> Cm, a minor third up) so the emotion built over the first half pays off here instead of dropping away.
+   Four-on-the-floor kick, backbeat, rolling distorted bass, supersaw pads and stabs, 16th hats in the second half, tom fill and riser into the well.
+   The black-hole identity stays: on odd bars the arpeggio slows note by note (time dilation), a gravity drone sits underneath,
+   and the last bar falls into the well. Even bars get a straight bright 16th arp instead. ================= */
 const EH_BASS=[36,36,32,34,36,41,37,31];
 const EH_PAD=[[55,60,63,67],[55,60,63,67],[56,60,63,67],[58,62,65,69],[55,60,63,67],[53,56,60,65],[61,65,68,72],[55,59,62,68]];
 const EH_LEAD=[[[0,79],[8,75],[12,77]],[[0,75],[6,74],[8,72]],[[0,80],[8,77],[12,75]],[[0,74],[6,77],[10,82]],[[0,84],[8,79],[12,75]],[[0,80],[6,77],[8,72],[12,80]],[[0,77],[6,80],[8,84],[12,80]],[[0,83],[8,79],[12,74]]];
+const EH_BASSP=['1011011010110110','1101110111011101'],EH_STAB=[[0,6,10],[0,3,6,10,14]],EH_HOOKBAR=[0,0,1,3];
 function stepHorizon(t,sd){
-  const ba=musicStep>>4,bar=ba&7,s=musicStep&15,bass=EH_BASS[bar],pad=EH_PAD[bar],bd=16*sd;
-  if(s===0)musicKick(t,.16);if(s===6)musicKick(t,.09);
-  if(s===8)musSnare(t,.07,.5,true);
-  if(s%4===2)musHat(t,.01);
-  if(bar===7&&s>=14)musTom(t,s===14?150:110,.08,.4);
-  if(s===0||s===10||(bar&1&&s===3))musDist(midiHz(bass),t,sd*(s===0?14:5),s===0?.07:.04,1.8,500);
+  const ba=musicStep>>4,bar=ba&7,sec=bar>>2,s=musicStep&15,bass=EH_BASS[bar],pad=EH_PAD[bar],bd=16*sd,fill=bar===7&&s>=12;
+  /* drums */
+  if(!fill&&s%4===0)musicKick(t,.2,true);
+  if(!fill&&((s===10&&(bar&1))||(s===14&&bar===3)))musicKick(t,.1,true);
+  if(fill)musTom(t,[210,175,140,110][s-12],.14,.3);else if(s===4||s===12)musSnare(t,.1,.35,true);
+  if(sec||s%2===0)musHat(t,.012+(s%4===2?.008:0));
+  if(s===14&&!(bar&1)&&!fill)musHat(t,.018,true);
+  /* bass: rolling distorted 16ths, denser in the second half */
+  if(EH_BASSP[sec][s]==='1'){let iv=0;if(s%8===3)iv=12;if(s%8===6&&(bar&3)===3)iv=1;musDist(midiHz(bass+iv),t,sd*1.6,.08,2.6,900)}
   if(s===0){
-    for(const n of pad)musPad(midiHz(n),t,bd+.3,.012,{wave:'sawtooth',att:1.1,rel:1.2,cut:600,cut2:1500,det:9,wet:.7});
+    for(const n of pad)musPad(midiHz(n),t,bd*.97,.014,{wave:'sawtooth',att:.3,rel:.5,cut:1100,cut2:3000,det:10,wet:.5});
     if(!(bar&1))musPad(midiHz(bass),t,bd*2,.03,{wave:'sawtooth',att:.8,rel:1.5,cut:240,det:6,wet:.2});
-    if(bar===0){musCrash(t,.02,.5);musBoom(t,.12,.8)}if(bar===4)musBoom(t,.12,.8);
+    if(bar===0){musCrash(t,.06,.5);musBoom(t,.2,.8)}if(bar===4){musCrash(t,.045,.5);musBoom(t,.18,.8)}
+    if(bar===3||bar===7)musNoise(t,bd,bar===7?.035:.022,{f0:400,f1:7000,q:.6,swell:true,wet:.25});
+    if(bar===3||bar===7)musT('sawtooth',t,bd,110,880,bar===7?.03:.02,{rise:true,lp:2400,wet:.2});
     if(bar&1)musNoise(t,bd*1.8,.02,{kind:'pink',type:'bandpass',f0:200,f1:1800,q:.9,swell:true,wet:.6});
-    if(bar===7)musT('sine',t,bd,80,420,.03,{rise:true,wet:.3});
-    /* time dilation: each gap is 1.3x the previous one */
-    const r=1.3;let sum=0,cum=0;for(let i=0;i<8;i++)sum+=Math.pow(r,i);
-    for(let i=0;i<8;i++){const n=pad[[0,1,2,3,2,3,1,3][i]]+12+(i>=4?12:0);synthNote(midiHz(n),t+bd*.96*cum/sum,1.2+i*.15,.016*(1-i*.05),'triangle',undefined,2500,.6,.01);cum+=Math.pow(r,i)}}
-  if(bar===7&&s===8)musT('sine',t,bd*.5,900,60,.05,{wet:.4});
-  for(const [st,nt] of EH_LEAD[bar])if(st===s){const f=midiHz(nt);synthNote(f,t,sd*7,.04,'sawtooth',undefined,1700,.5,.05);synthNote(f,t,sd*7,.03,'sine',undefined,2500,.5,.05)}}
+    if(bar===7)musT('sine',t,bd,80,420,.04,{rise:true,wet:.3});
+    /* time dilation on odd bars: each gap is 1.3x the previous one */
+    if(bar&1){const r=1.3;let sum=0,cum=0;for(let i=0;i<8;i++)sum+=Math.pow(r,i);
+      for(let i=0;i<8;i++){const nn=pad[[0,1,2,3,2,3,1,3][i]]+12+(i>=4?12:0),tt=t+bd*.96*cum/sum;synthNote(midiHz(nn),tt,1.2+i*.15,.024*(1-i*.05),'triangle',undefined,3200,.6,.01);synthNote(midiHz(nn),tt,1.0+i*.12,.008*(1-i*.05),'sawtooth',undefined,2200,.5,.01);cum+=Math.pow(r,i)}}}
+  if(!(bar&1)&&s%2===1)synthNote(midiHz(pad[(s>>1)&3]+24),t,sd*1.5,.015,'triangle',undefined,3600,.2);
+  if(bar===7&&s===8)musT('sine',t,bd*.5,900,60,.06,{wet:.4});
+  /* stabs */
+  if(EH_STAB[sec].includes(s))for(const n of pad)synthNote(midiHz(n+12),t,sd*1.8,.014,'sawtooth',undefined,2600,.15,.005,s%2?8:-8);
+  /* lead: the flight hook in C minor (A section = flight bars, B section = flight's second melody) */
+  if(s%2===0){const mi=(bar<4?FLIGHT_MELODY[EH_HOOKBAR[bar]*8+(s>>1)]:FLIGHT_MELODY_B[(bar-4)*8+(s>>1)])+3,f=midiHz(mi);
+    synthNote(f,t,sd*1.9,.05,'sawtooth',undefined,3600,.25,.006);synthNote(f*1.012,t,sd*1.9,.032,'sawtooth',undefined,3200);synthNote(f*.5,t,sd*1.9,.02,'square',undefined,1400);
+    if(s%4===0)synthNote(f*2,t,sd*1.8,.016,'triangle',undefined,4500);
+    if(s%4===0)synthNote(f,t+sd*3,sd*1.6,.012,'triangle',undefined,2800,.5,.01)}
+  /* the original long, high notes stay on top as a haunting shimmer */
+  for(const [st,nt] of EH_LEAD[bar])if(st===s)synthNote(midiHz(nt),t,sd*7,.02,'sine',undefined,2500,.6,.05)}
 
 /* ================= theme control ================= */
 const MUS_STEP={idle:stepIdle,flight:stepFlight,perplexity:stepPerp,horizon:stepHorizon};
