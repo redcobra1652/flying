@@ -7,13 +7,14 @@ function readStats(){
   if(FF_STATS)return FF_STATS;
   let x=null;try{x=JSON.parse(localStorage.getItem(STATS_KEY)||'null')}catch{}
   const n=(v,max)=>Math.max(0,Math.min(max,Number.isFinite(Number(v))?Number(v):0));
-  const s={maxMap:0,voidSeen:false,runs:0,air:0,uses:{shield:0,slow:0,autopilot:0},haz:{},ach:{},seen:[]};
+  const s={maxMap:0,voidSeen:false,runs:0,air:0,uses:{shield:0,slow:0,autopilot:0},haz:{},ach:{},claimed:{},seen:[]};
   if(x&&typeof x==='object'){
     s.maxMap=Math.floor(n(x.maxMap,LEVELS.length-1));s.voidSeen=!!x.voidSeen;
     s.runs=Math.floor(n(x.runs,1e9));s.air=n(x.air,1e9);
     for(const k of ['shield','slow','autopilot'])s.uses[k]=Math.floor(n(x.uses&&x.uses[k],1e9));
     if(x.haz&&typeof x.haz==='object')for(const k in x.haz)if(x.haz[k])s.haz[k]=true;
     if(x.ach&&typeof x.ach==='object')for(const k in x.ach)s.ach[k]=Number(x.ach[k])||1;
+    if(x.claimed&&typeof x.claimed==='object')for(const k in x.claimed)if(x.claimed[k])s.claimed[k]=Number(x.claimed[k])||1;
     if(Array.isArray(x.seen))s.seen=x.seen.filter(v=>typeof v==='string').slice(0,200);
   }
   return FF_STATS=s;
@@ -118,6 +119,15 @@ function recordMap(m){
     {id:'logged_hours',cat:4,tier:2,icon:'clock',name:'Logged Hours',desc:'Spend 1 hour in the air.',goal:3600,time:true,val:c=>c.air},
     {id:'seasoned_aviator',cat:4,tier:4,icon:'clock',name:'Seasoned Aviator',desc:'Spend 10 hours in the air.',goal:36000,time:true,val:c=>c.air}
   ];
+  /* one-time credit reward per achievement, paid when the player presses CLAIM */
+  const REWARD={
+    first_flight:50,short_haul:100,long_haul:250,transcontinental:600,frequent_flyer:150,gold_status:400,platinum_status:1000,million_meter_club:5000,
+    pathfinder:150,cartographer:500,master_cartographer:1200,final_approach:1500,beyond_the_horizon:1000,
+    field_researcher:150,hazard_analyst:750,
+    hangar_expansion:100,full_hangar:1000,systems_upgrade:100,fully_loaded:1000,flight_log_entry:100,logbook_veteran:600,
+    emergency_protocol:50,time_dilation:50,hands_free:50,systems_operator:250,line_pilot:200,captain:800,logged_hours:400,seasoned_aviator:2500
+  };
+  const rewardOf=id=>REWARD[id]||0;
   function ctx(S){
     S=S||readStats();const max=mapsReached(S),ab=save.abilities||{};
     return{
@@ -136,7 +146,8 @@ function recordMap(m){
     syncDots();return fresh;
   }
   const unseen=()=>{const S=readStats();return Object.keys(S.ach).filter(id=>ACH.some(a=>a.id===id)&&!S.seen.includes(id))};
-  function syncDots(){const n=unseen().length;btn.classList.toggle('has-new',n>0);const t=$('sxTabAch');if(t)t.classList.toggle('has-new',n>0)}
+  const unclaimed=()=>{const S=readStats();return Object.keys(S.ach).filter(id=>ACH.some(a=>a.id===id)&&!S.claimed[id])};
+  function syncDots(){const n=unseen().length+unclaimed().length;btn.classList.toggle('has-new',n>0);const t=$('sxTabAch');if(t)t.classList.toggle('has-new',n>0)}
 
   /* ================= previews: maps ================= */
   const hx=c=>{c=String(c).replace('#','');if(c.length===3)c=c.split('').map(x=>x+x).join('');return[0,2,4].map(i=>parseInt(c.slice(i,i+2),16)||0)};
@@ -231,6 +242,14 @@ function recordMap(m){
     }).join('');
   }
   const CIRC=2*Math.PI*24;
+  const CHECK='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const claimedHTML=()=>`<span class="sx-claimed">${CHECK}CLAIMED</span>`;
+  function claimUI(a,S,hidden){
+    const rw=rewardOf(a.id);if(!rw)return'';
+    if(S.claimed[a.id])return claimedHTML();
+    if(S.ach[a.id])return`<button type="button" class="sx-claim" data-claim="${a.id}" aria-label="Claim ${esc(a.name)}: ${rw} credits"><span>CLAIM</span><b>◈ ${rw.toLocaleString()}</b></button>`;
+    return hidden?'':`<span class="sx-reward" title="Reward">◈ ${rw.toLocaleString()}</span>`;
+  }
   function renderAch(S){
     const c=ctx(S),fresh=new Set(unseen()),total=ACH.length,got=ACH.filter(a=>S.ach[a.id]).length;
     $('spAchCount').innerHTML=`${got}<small> / ${total}</small>`;
@@ -242,7 +261,7 @@ function recordMap(m){
       for(const a of list){
         const done=!!S.ach[a.id],v=Math.min(a.val(c),a.goal),p=done?1:v/a.goal,hidden=a.secret&&!done;
         const prog=done?'Unlocked':hidden?'Hidden':a.goal===1?'Locked':a.time?`${fmtT(v)} / ${fmtT(a.goal)}`:`${Math.floor(v).toLocaleString()} / ${a.goal.toLocaleString()}`;
-        out+=`<div class="sx-ach${done?' done':''}${a.secret?' secret':''}" data-tier="${a.tier}"><div class="sx-medal"><svg class="ring" viewBox="0 0 52 52"><circle class="tr" cx="26" cy="26" r="24"/><circle class="pr" cx="26" cy="26" r="24" stroke-dasharray="${f1(CIRC)}" stroke-dashoffset="${f1(CIRC*(1-p))}"/></svg><div class="ico">${svgIcon(hidden?'lock':a.icon)}</div></div><div class="sx-meta"><div class="sx-aname">${hidden?'HIDDEN ACHIEVEMENT':esc(a.name)}</div><div class="sx-adesc">${hidden?'Keep flying to find out.':esc(a.desc)}</div><div class="sx-aprog">${prog}</div></div>${fresh.has(a.id)?'<span class="sx-new">NEW</span>':''}</div>`;
+        out+=`<div class="sx-ach${done?' done':''}${a.secret?' secret':''}${done&&!S.claimed[a.id]?' claimable':''}" data-tier="${a.tier}"><div class="sx-medal"><svg class="ring" viewBox="0 0 52 52"><circle class="tr" cx="26" cy="26" r="24"/><circle class="pr" cx="26" cy="26" r="24" stroke-dasharray="${f1(CIRC)}" stroke-dashoffset="${f1(CIRC*(1-p))}"/></svg><div class="ico">${svgIcon(hidden?'lock':a.icon)}</div></div><div class="sx-meta"><div class="sx-aname">${hidden?'HIDDEN ACHIEVEMENT':esc(a.name)}</div><div class="sx-adesc">${hidden?'Keep flying to find out.':esc(a.desc)}</div><div class="sx-aprog">${prog}</div></div>${fresh.has(a.id)?'<span class="sx-new">NEW</span>':''}${claimUI(a,S,hidden)}</div>`;
       }
       out+='</div>';
     });
@@ -263,6 +282,61 @@ function recordMap(m){
     $('sxSegMapsN').textContent=(max+1)+' / '+total;$('sxSegHazN').textContent=hs+' / '+HAZ.length;
     renderMaps(S,max);renderHaz(S,max);renderAch(S);
   }
+
+  /* ================= claiming ================= */
+  let toastTimer=0;
+  function creditToast(name,amt){
+    let t=$('sxToast');
+    if(!t){t=document.createElement('div');t.id='sxToast';t.className='sx-toast';t.setAttribute('role','status');t.setAttribute('aria-live','polite');panel.appendChild(t)}
+    t.innerHTML=`<i>◈</i><div><b>+${amt.toLocaleString()} CREDITS</b><span>${esc(name)} claimed · Balance ◈ ${Math.floor(save.credits).toLocaleString()}</span></div>`;
+    t.classList.remove('show');void t.offsetWidth;t.classList.add('show');
+    clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2600);
+  }
+  function claim(id,btn){
+    const S=readStats(),a=ACH.find(x=>x.id===id);
+    if(!a||!S.ach[id]||S.claimed[id])return;           /* must be unlocked and not yet claimed */
+    const amt=rewardOf(id);if(!amt)return;
+    S.claimed[id]=Date.now();writeStats();
+    save.credits=Math.min(1000000000,Math.floor((save.credits||0)+amt));persistSave();
+    try{refreshCredits()}catch{}
+    const row=btn&&btn.closest('.sx-ach');
+    if(row){
+      const fly=document.createElement('span');fly.className='sx-fly';fly.textContent='+'+amt.toLocaleString();row.appendChild(fly);setTimeout(()=>fly.remove(),1300);
+      row.classList.remove('claimable');row.classList.add('just-claimed');
+      btn.outerHTML=claimedHTML();
+    }
+    creditToast(a.name,amt);syncDots();
+  }
+  $('sxAch').addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('.sx-claim');if(b)claim(b.dataset.claim,b)});
+  (function(){
+    const st=document.createElement('style');
+    st.textContent=`
+.sx-ach{position:relative}
+.sx-ach .sx-reward{margin-left:auto;flex:none;align-self:center;padding-left:12px;font:700 11px/1 'Manrope',sans-serif;letter-spacing:.08em;color:var(--sx-mute,#8aa0ad);opacity:.85;white-space:nowrap}
+.sx-claim{margin-left:auto;flex:none;align-self:center;display:inline-flex;align-items:center;gap:9px;height:36px;padding:0 6px 0 15px;border:0;border-radius:999px;cursor:pointer;font:800 11px/1 'Manrope',sans-serif;letter-spacing:.15em;color:#1d1405;background:linear-gradient(180deg,#ffe28f 0%,#f4b63d 100%);box-shadow:0 1px 0 rgba(255,255,255,.6) inset,0 0 0 1px rgba(150,98,10,.35),0 6px 16px rgba(244,182,61,.32);transition:transform .15s ease,filter .15s ease,box-shadow .15s ease;animation:sxClaimGlow 2.4s ease-in-out infinite;white-space:nowrap}
+.sx-claim b{font-weight:800;letter-spacing:.04em;padding:6px 10px;border-radius:999px;background:rgba(29,20,5,.14)}
+.sx-claim:hover{transform:translateY(-1px);filter:brightness(1.06)}
+.sx-claim:active{transform:scale(.96)}
+.sx-claim:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.sx-claimed{margin-left:auto;flex:none;align-self:center;display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:999px;font:800 10.5px/1 'Manrope',sans-serif;letter-spacing:.15em;color:#7fdca0;background:rgba(127,220,160,.1);box-shadow:0 0 0 1px rgba(127,220,160,.28) inset;white-space:nowrap}
+.sx-claimed svg{width:13px;height:13px}
+.sx-ach.just-claimed .sx-claimed{animation:sxClaimedPop .45s cubic-bezier(.2,1.4,.4,1)}
+.sx-ach.claimable{box-shadow:0 0 0 1px rgba(244,182,61,.35) inset}
+.sx-fly{position:absolute;right:22px;top:50%;font:800 15px/1 'Manrope',sans-serif;color:#ffd262;text-shadow:0 2px 10px rgba(0,0,0,.5);pointer-events:none;animation:sxFly 1.2s ease-out forwards;z-index:3}
+.sx-toast{position:absolute;left:50%;bottom:22px;z-index:60;display:flex;align-items:center;gap:12px;padding:11px 18px 11px 12px;border-radius:14px;background:rgba(18,24,34,.94);box-shadow:0 0 0 1px rgba(244,182,61,.4),0 14px 36px rgba(0,0,0,.45);color:#fff;pointer-events:none;opacity:0;transform:translate(-50%,16px);transition:opacity .25s ease,transform .3s cubic-bezier(.2,1.2,.4,1)}
+.sx-toast.show{opacity:1;transform:translate(-50%,0)}
+.sx-toast i{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;font:800 17px/1 'Manrope',sans-serif;font-style:normal;color:#1d1405;background:linear-gradient(180deg,#ffe28f,#f4b63d)}
+.sx-toast b{display:block;font:800 14px/1.1 'Manrope',sans-serif;letter-spacing:.1em;color:#ffd262}
+.sx-toast span{display:block;margin-top:4px;font:600 11.5px/1.2 'Manrope',sans-serif;color:rgba(255,255,255,.72)}
+@keyframes sxClaimGlow{0%,100%{box-shadow:0 1px 0 rgba(255,255,255,.6) inset,0 0 0 1px rgba(150,98,10,.35),0 6px 16px rgba(244,182,61,.28)}50%{box-shadow:0 1px 0 rgba(255,255,255,.6) inset,0 0 0 1px rgba(150,98,10,.35),0 6px 22px rgba(244,182,61,.6)}}
+@keyframes sxClaimedPop{0%{transform:scale(.7);opacity:0}100%{transform:scale(1);opacity:1}}
+@keyframes sxFly{0%{transform:translateY(0);opacity:0}15%{opacity:1}100%{transform:translateY(-38px);opacity:0}}
+.sx-calm .sx-claim,.sx-calm .sx-ach.just-claimed .sx-claimed,.sx-calm .sx-fly{animation:none}
+.sx-calm .sx-fly{display:none}
+.sx-calm .sx-toast{transition:none}
+@media (max-width:520px){.sx-claim{padding-left:12px;letter-spacing:.1em}.sx-claim b{padding:6px 8px}}`;
+    document.head.appendChild(st);
+  })();
 
   /* ================= tabs ================= */
   const tabs=['Flight','Discovered','Ach'].map(k=>({tab:$('sxTab'+k),pane:$('sxPane'+k)}));

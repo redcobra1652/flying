@@ -595,12 +595,11 @@ const TOUR=[
   /* 3 */ {mode:'SHOP',target:'.hangar-panel',fit:'abilities',tag:'ABILITIES',title:'Three tools for the sky',text:'Unlock and upgrade Shield, Slow-Mo and Autopilot here, then trigger them mid-flight.',next:'NEXT',shop:true},
   /* 4 */ {mode:'SHOP',target:'#hangarBack',tag:'ALL SET',title:'Back to the runway',text:`${tap} Back when you are ready.`,shop:true,done:()=>state.mode==='HOME'},
   /* 5 */ {mode:'HOME',target:'#homeStats',tag:'STATISTICS',title:'Track your progress',text:`${tap} Statistics to see your flight record, what you have discovered, and your achievements.`,done:statsOpen},
-  /* 6 */ {mode:'HOME',target:'#sxTabAch',tag:'ACHIEVEMENTS',title:'Achievements pay credits',text:`${tap} the Achievements tab. Every achievement you unlock earns you credits.`,shop:true,needs:statsOpen,done:achOpen},
-  /* 7 */ {mode:'HOME',target:'.stats-panel',tag:'ACHIEVEMENTS',title:'Another way to earn',text:'Besides flying farther, you earn credits by completing achievements. Check back here as you fly.',next:'NEXT',shop:true,needs:statsOpen},
-  /* 8 */ {mode:'HOME',target:'#closeStats',tag:'STATISTICS',title:'Nicely done',text:`${tap} the ✕ to close it.`,shop:true,done:()=>!statsOpen()},
-  /* 9 */ {mode:'HOME',target:'#play',tag:'READY',title:'Take flight',text:touch?'Tap TAKE FLIGHT to start your next run.':'Click TAKE FLIGHT, or press Space, to start your next run.',shop:true}
+  /* 6 */ {mode:'HOME',target:'#sxTabAch',tag:'ACHIEVEMENTS',title:'Achievements pay credits',text:`${tap} the Achievements tab. Every achievement you unlock pays out credits.`,shop:true,needs:statsOpen,done:achOpen},
+  /* 7 */ {mode:'HOME',target:'.stats-panel',tag:'ACHIEVEMENTS',title:'Another way to earn',text:'Unlock an achievement, then press CLAIM to collect its credits. Check back here as you fly.',next:'NEXT',shop:true,needs:statsOpen},
+  /* 8 */ {mode:'HOME',target:'#closeStats',tag:'STATISTICS',title:'Nicely done',text:`${tap} the ✕ to close it.`,shop:true,done:()=>!statsOpen()}
 ];
-const STATS_I=5,READY_I=TOUR.length-1;
+const STATS_I=5;
 let tourI=-1,tourTimer=null,tourAdvance=false;
 function tourRender(){
   const st=TOUR[tourI];if(!st)return;tourAdvance=false;
@@ -615,7 +614,7 @@ function tourTick(){
     if(st.mode==='HOME'&&state.mode==='SHOP'&&tourI===0){tourGo(1);return}
     endTour();return
   }
-  if(st.needs&&!st.needs()){tourGo(READY_I);return}   /* stats closed early: skip to the last step */
+  if(st.needs&&!st.needs()){endTour();return}   /* stats closed early: the tour is over */
   if(st.done&&st.done()||tourAdvance){tourGo(tourI+1)}
 }
 function tourGo(i){
