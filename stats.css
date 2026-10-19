@@ -1,0 +1,175 @@
+/* Farflight statistics panel: Flight / Discovered / Achievements.
+   Self-contained. Retune the look from the variables on #stats .stats-panel. */
+
+#stats .stats-panel{
+  --sx-bg:rgba(13,27,42,.88);
+  --sx-line:rgba(190,225,240,.16);
+  --sx-text:#eef6fa;
+  --sx-mute:#9db5c3;
+  --sx-accent:#8fc4d8;
+  --sx-ember:#ff765e;
+  --sx-gold:#f5cf6b;
+  --sx-card:rgba(255,255,255,.045);
+  display:flex;flex-direction:column;gap:0;
+  width:min(800px,94vw);max-width:none;
+  height:min(680px,88vh);max-height:88vh;
+  padding:22px 0 0;overflow:hidden;
+  background:var(--sx-bg);color:var(--sx-text);
+  -webkit-backdrop-filter:blur(18px) saturate(1.2);backdrop-filter:blur(18px) saturate(1.2);
+  border:1px solid var(--sx-line);border-radius:22px;
+  font-family:'Manrope',system-ui,sans-serif;
+}
+#stats .stats-panel .settings-head{padding:0 26px;margin:0 0 14px;flex:none}
+#stats .stats-panel .micro{color:var(--sx-mute)}
+#stats .stats-panel h2{color:var(--sx-text)}
+#stats .stats-panel .settings-close{color:var(--sx-text)}
+
+/* ---- tabs ---- */
+.sx-tabs{display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--sx-line);flex:none}
+.sx-tab{
+  appearance:none;background:none;border:0;cursor:pointer;color:var(--sx-mute);
+  font:700 12px/1 'Manrope',system-ui,sans-serif;letter-spacing:.14em;
+  padding:13px 12px 14px;position:relative;display:flex;align-items:center;gap:8px;
+  transition:color .18s;
+}
+.sx-tab:hover{color:var(--sx-text)}
+.sx-tab[aria-selected="true"]{color:var(--sx-text)}
+.sx-tab[aria-selected="true"]::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--sx-accent)}
+.sx-tab:focus-visible,.sx-seg button:focus-visible{outline:2px solid var(--sx-accent);outline-offset:2px;border-radius:8px}
+.sx-count{white-space:nowrap;font-style:normal;font-weight:700;font-size:11px;letter-spacing:.04em;color:var(--sx-mute);background:rgba(255,255,255,.08);padding:3px 7px;border-radius:99px}
+.sx-tab.has-new::before{content:"";position:absolute;top:9px;right:2px;width:7px;height:7px;border-radius:50%;background:var(--sx-ember);box-shadow:0 0 0 3px rgba(255,118,94,.22)}
+
+/* ---- scroll area ---- */
+.sx-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:20px 26px 28px;scrollbar-width:thin;scrollbar-color:rgba(190,225,240,.3) transparent;overscroll-behavior:contain}
+.sx-scroll [hidden]{display:none!important}
+
+/* ---- Flight pane ---- */
+.sx-hero{display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding:4px 0 18px;border-bottom:1px solid var(--sx-line)}
+.sx-hero .sx-k{font:700 11px/1 'Manrope',sans-serif;letter-spacing:.16em;color:var(--sx-mute)}
+.sx-hero .sx-big{font:800 clamp(34px,7vw,52px)/1 'Manrope',sans-serif;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.sx-rows{display:grid;grid-template-columns:1fr 1fr;column-gap:34px}
+.sx-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid var(--sx-line)}
+.sx-row .sx-k{font:700 11px/1.2 'Manrope',sans-serif;letter-spacing:.14em;color:var(--sx-mute)}
+.sx-row .sx-v{font:700 17px/1.1 'Manrope',sans-serif;font-variant-numeric:tabular-nums;text-align:right}
+.sx-row .sx-v small{font-size:12px;font-weight:600;color:var(--sx-mute)}
+.sx-progress{padding:18px 0 4px}
+.sx-progress .sx-line{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+.sx-bar{display:block;height:7px;border-radius:99px;background:rgba(255,255,255,.09);overflow:hidden}
+.sx-bar b{display:block;height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,var(--sx-accent),#c9efe6);transition:width .9s cubic-bezier(.2,.7,.2,1)}
+.sx-sub{display:block;margin-top:9px;font:600 13px/1.3 'Manrope',sans-serif;color:var(--sx-mute)}
+
+/* ---- Discovered: segmented switch ---- */
+.sx-seg{display:inline-flex;padding:3px;gap:3px;border-radius:12px;background:rgba(255,255,255,.07);margin-bottom:18px}
+.sx-seg button{appearance:none;border:0;background:none;cursor:pointer;color:var(--sx-mute);font:700 11px/1 'Manrope',sans-serif;letter-spacing:.14em;padding:10px 16px;border-radius:9px;display:flex;gap:8px;align-items:center;transition:background .18s,color .18s}
+.sx-seg button i{font-style:normal;font-weight:700;letter-spacing:.03em;opacity:.8}
+.sx-seg button[aria-selected="true"]{background:rgba(143,196,216,.2);color:var(--sx-text)}
+.sx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
+.sx-card{border-radius:14px;overflow:hidden;background:var(--sx-card);border:1px solid var(--sx-line);display:flex;flex-direction:column}
+.sx-prev{position:relative;aspect-ratio:16/10;background:#0a1420;overflow:hidden}
+.sx-prev svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.sx-info{padding:12px 14px 14px;display:flex;flex-direction:column;gap:6px;min-height:84px}
+.sx-name{font:800 15px/1.2 'Manrope',sans-serif;letter-spacing:.01em}
+.sx-desc{font:500 12.5px/1.45 'Manrope',sans-serif;color:var(--sx-mute)}
+.sx-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:auto;padding-top:4px}
+.sx-tags span{font:700 10px/1 'Manrope',sans-serif;letter-spacing:.05em;color:var(--sx-text);background:rgba(255,255,255,.09);padding:5px 7px;border-radius:6px}
+.sx-badge{position:absolute;left:10px;top:10px;font:800 10px/1 'Manrope',sans-serif;letter-spacing:.12em;padding:5px 7px;border-radius:6px;background:rgba(8,16,26,.62);color:var(--sx-text);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+
+.sx-card.locked{background:rgba(255,255,255,.025);border-style:dashed}
+.sx-card.locked .sx-prev{background:repeating-linear-gradient(135deg,#0e1a28 0 9px,#112030 9px 18px)}
+.sx-card.locked .sx-lock{position:absolute;inset:0;display:grid;place-items:center;color:rgba(157,181,195,.55)}
+.sx-card.locked .sx-lock svg{position:static;width:34px;height:34px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.sx-card.locked .sx-name{color:var(--sx-mute);letter-spacing:.14em;font-size:12px}
+.sx-card.locked .sx-desc{color:rgba(157,181,195,.6)}
+
+/* ---- Achievements ---- */
+.sx-ach-head{display:flex;align-items:center;gap:18px;padding:2px 0 18px;border-bottom:1px solid var(--sx-line);margin-bottom:6px}
+.sx-ach-head .sx-big{font:800 34px/1 'Manrope',sans-serif;letter-spacing:-.02em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.sx-ach-head .sx-big small{font-size:15px;font-weight:700;color:var(--sx-mute);letter-spacing:0}
+.sx-ach-head .sx-bar{flex:1}
+.sx-cat{display:flex;align-items:baseline;justify-content:space-between;margin:22px 0 10px;font:800 12px/1 'Manrope',sans-serif;letter-spacing:.16em;color:var(--sx-mute)}
+.sx-cat i{font-style:normal;font-weight:700;letter-spacing:.04em}
+.sx-achs{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.sx-ach{--tier:#c98a5a;display:flex;gap:14px;align-items:center;padding:12px 14px;border-radius:14px;background:var(--sx-card);border:1px solid var(--sx-line);position:relative}
+.sx-ach[data-tier="2"]{--tier:#cfd8de}
+.sx-ach[data-tier="3"]{--tier:#f5cf6b}
+.sx-ach[data-tier="4"]{--tier:#9ee7ff}
+.sx-medal{position:relative;flex:none;width:52px;height:52px;color:var(--tier)}
+.sx-medal svg.ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
+.sx-medal svg.ring circle{fill:none;stroke-width:3}
+.sx-medal svg.ring .tr{stroke:rgba(255,255,255,.1)}
+.sx-medal svg.ring .pr{stroke:var(--tier);stroke-linecap:round;transition:stroke-dashoffset .9s cubic-bezier(.2,.7,.2,1)}
+.sx-medal .ico{position:absolute;inset:9px;display:grid;place-items:center;border-radius:50%;background:rgba(255,255,255,.06)}
+.sx-medal .ico svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.sx-ach.done .sx-medal .ico{background:radial-gradient(circle at 35% 30%,color-mix(in srgb,var(--tier) 55%,#fff) 0,var(--tier) 70%);color:#14202c;box-shadow:0 0 16px color-mix(in srgb,var(--tier) 40%,transparent)}
+.sx-ach:not(.done) .sx-medal{color:rgba(157,181,195,.7)}
+.sx-ach:not(.done) .sx-medal svg.ring .pr{stroke:rgba(157,181,195,.55)}
+.sx-aname{font:800 14.5px/1.2 'Manrope',sans-serif}
+.sx-adesc{font:500 12.5px/1.4 'Manrope',sans-serif;color:var(--sx-mute);margin-top:3px}
+.sx-ach .sx-meta{min-width:0;flex:1}
+.sx-aprog{margin-top:7px;font:700 11px/1 'Manrope',sans-serif;letter-spacing:.04em;color:var(--sx-accent);font-variant-numeric:tabular-nums}
+.sx-ach.done .sx-aprog{color:var(--sx-gold)}
+.sx-ach.secret:not(.done) .sx-aname{letter-spacing:.14em;font-size:12px;color:var(--sx-mute)}
+.sx-new{position:absolute;right:10px;top:10px;font:800 9px/1 'Manrope',sans-serif;letter-spacing:.12em;padding:4px 6px;border-radius:5px;background:var(--sx-ember);color:#fff}
+
+/* home button dot */
+#homeStats{position:relative}
+#homeStats.has-new::after{content:"";position:absolute;top:-3px;right:-3px;width:10px;height:10px;border-radius:50%;background:var(--sx-ember,#ff765e);box-shadow:0 0 0 3px rgba(255,118,94,.28)}
+
+@media (max-width:620px){
+  #stats .stats-panel{height:92vh;max-height:92vh;border-radius:18px}
+  #stats .stats-panel .settings-head{padding:0 18px}
+  .sx-tabs{padding:0 8px;overflow-x:auto;justify-content:space-between}
+  .sx-tab{padding:12px 8px 13px;letter-spacing:.08em;font-size:11px;white-space:nowrap}
+  .sx-tab .sx-count{display:none}
+  .sx-scroll{padding:16px 16px 26px}
+  .sx-rows{grid-template-columns:1fr}
+  .sx-grid{grid-template-columns:repeat(2,1fr);gap:10px}
+  .sx-info{padding:10px 11px 12px}
+  .sx-achs{grid-template-columns:1fr}
+}
+@media (max-width:380px){.sx-grid{grid-template-columns:1fr}}
+
+/* ---- preview animations (base style of each element is its still "showcase" pose) ---- */
+.sxh *{transform-box:fill-box}
+.sxh-rise{transform-origin:50% 100%;animation:sx-rise 3.4s ease-in-out infinite}
+@keyframes sx-rise{0%,12%{transform:scaleY(.04)}30%,60%{transform:scaleY(1)}78%,100%{transform:scaleY(.04)}}
+.sxh-glow{animation:sx-glow 2.6s ease-in-out infinite}
+@keyframes sx-glow{0%,100%{opacity:.45}50%{opacity:1}}
+.sxh-meteor{animation:sx-meteor 3s cubic-bezier(.5,0,.9,.6) infinite}
+@keyframes sx-meteor{0%{transform:translate(-78px,-96px);opacity:1}62%{transform:translate(0,0);opacity:1}63%,100%{transform:translate(0,0);opacity:0}}
+.sxh-blast{transform-origin:50% 50%;animation:sx-blast 3s ease-out infinite;opacity:0}
+@keyframes sx-blast{0%,61%{transform:scale(.2);opacity:0}63%{transform:scale(.4);opacity:.95}100%{transform:scale(1.7);opacity:0}}
+.sxh-reticle{transform-origin:50% 50%;animation:sx-reticle 3s ease-in-out infinite}
+@keyframes sx-reticle{0%,100%{opacity:.45;transform:scale(.9)}50%{opacity:1;transform:scale(1)}}
+.sxh-bolt{animation:sx-bolt 3.2s linear infinite;opacity:.9}
+@keyframes sx-bolt{0%,64%{opacity:0}66%{opacity:1}69%{opacity:.15}72%{opacity:1}80%,100%{opacity:0}}
+.sxh-flash{opacity:0;animation:sx-flash 3.2s linear infinite}
+@keyframes sx-flash{0%,64%{opacity:0}66%{opacity:.5}69%{opacity:.05}72%{opacity:.4}82%,100%{opacity:0}}
+.sxh-crack{animation:sx-crack 3.2s ease-in infinite}
+@keyframes sx-crack{0%{opacity:.15}45%,70%{opacity:1}100%{opacity:.15}}
+.sxh-col{transform-origin:50% 100%;animation:sx-col 3.2s cubic-bezier(.2,.8,.3,1) infinite}
+@keyframes sx-col{0%,44%{transform:scaleY(0);opacity:1}56%{transform:scaleY(1)}72%{transform:scaleY(.9);opacity:1}86%,100%{transform:scaleY(.9);opacity:0}}
+.sxh-spark{animation:sx-spark 3.2s ease-out infinite;opacity:0}
+@keyframes sx-spark{0%,46%{transform:translate(0,0);opacity:0}52%{opacity:1}90%{transform:translate(var(--dx,0),-38px);opacity:0}100%{opacity:0}}
+.sxh-spin{transform-origin:50% 50%;animation:sx-spin 5s linear infinite}
+@keyframes sx-spin{to{transform:rotate(360deg)}}
+.sxh-gust{animation:sx-gust 2.4s linear infinite}
+@keyframes sx-gust{0%{transform:translateX(-90px);opacity:0}15%{opacity:1}85%{opacity:1}100%{transform:translateX(220px);opacity:0}}
+.sxh-beam{transform-origin:50% 100%;animation:sx-beam 3.6s ease-out infinite}
+@keyframes sx-beam{0%,52%{transform:scaleY(0);opacity:0}55%{transform:scaleY(1);opacity:1}72%{opacity:1}88%,100%{transform:scaleY(1);opacity:0}}
+.sxh-slide{animation:sx-slide 3.6s ease-in-out infinite alternate}
+@keyframes sx-slide{from{transform:translateX(-14px)}to{transform:translateX(14px)}}
+.sxh-pulse{transform-origin:50% 100%;animation:sx-pulse 4s ease-in-out infinite}
+@keyframes sx-pulse{0%,45%{transform:scaleY(1)}58%,80%{transform:scaleY(.14)}92%{transform:scaleY(.14)}100%{transform:scaleY(1)}}
+.sxh-blink{animation:sx-blink 3s steps(1,end) infinite}
+@keyframes sx-blink{0%{opacity:1}34%{opacity:.12}50%{opacity:1}67%{opacity:.12}100%{opacity:1}}
+.sxm-hue{animation:sx-hue 7s linear infinite}
+@keyframes sx-hue{to{filter:hue-rotate(360deg)}}
+.sxm-twinkle{animation:sx-glow 3.2s ease-in-out infinite}
+.sxm-drift{animation:sx-drift 6s linear infinite}
+@keyframes sx-drift{from{transform:translateY(-4px)}to{transform:translateY(14px)}}
+
+/* calm: reduced-motion OS setting or the game's "Reduced flashing" */
+.sx-calm *,.sx-calm *::before,.sx-calm *::after{animation:none!important;transition:none!important}
+#stats:not(.active) .sx-scroll *{animation-play-state:paused!important}
+@media (prefers-reduced-motion:reduce){#stats .stats-panel *{animation:none!important;transition:none!important}}

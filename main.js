@@ -55,7 +55,7 @@ function nearGate(){jumpToMap(PERP_IDX-1);const D=GATE_D-60;state.distance=state
 window.__nearGate=nearGate;
 /* GAME FLOW */
 function resetWorld(){clearCrash();clearMeteors();resetField();state.distance=0;state.worldZ=0;touchAxis=0;touchRoll=0;touchPts.clear();state.x=0;state.vx=0;state.bank=0;state.yaw=0;state.speed=0;state.level=0;state.levelStart=0;state.fromLevel=state.toLevel=0;state.transition=1;state.timeScale=1;state.worldScale=1;state.worldScaleTarget=1;state.clock=0;state.worldClock=0;state.crashElapsed=0;state.hitTimer=0;state.shake=0;state.rumble=0;state.meteorTimer=8;resetHazardTimers(0);state.terrainAnim=false;state.spikeWeight=0;state.levelsReached=0;resetGateState();state.paidThisRun=0;state.paidRunDistance=0;state.paidRunLevel=0;state.lifetimeAccountedDistance=0;state.shieldTimer=state.shieldSafety=state.slowTimer=0;state.shieldCooldown=save.abilities.shield?ABILITIES.shield.levels[save.abilities.shield].cooldown:0;state.slowCooldown=save.abilities.slow?ABILITIES.slow.levels[save.abilities.slow].cooldown:0;state.apTimer=0;state.apCooldown=save.abilities.autopilot?ABILITIES.autopilot.levels[save.abilities.autopilot].cooldown:0;apHide();plane.visible=true;plane.scale.setScalar(.42);plane.position.set(0,CONFIG.baseAltitude,0);plane.rotation.set(0,0,0);resetRollSystem();shieldBubble.visible=false;streamChunks(true);camera.position.set(0,5.2,10.5);camera.fov=57;camera.updateProjectionMatrix()}
-function startRun(){if(state.mode==='PLAYING'||state.mode==='SHOP'||state.lock||state.tut)return;resetWorld();state.speed=CONFIG.baseSpeed;if(DEBUG_MAP>0)jumpToMap(DEBUG_MAP);else if(DEBUG_GATE)nearGate();state.mode='PLAYING';home.classList.remove('active');dead.classList.remove('active');hud.classList.add('visible');document.getElementById('distance').textContent='0';document.getElementById('levelToast').textContent=LEVELS[DEBUG_MAP].name;document.getElementById('levelToast').classList.add('show');setTimeout(()=>document.getElementById('levelToast').classList.remove('show'),1800);document.getElementById('vignette').classList.remove('on');document.getElementById('slowGrade').classList.remove('on');startMusic(true)}
+function startRun(){if(state.mode==='PLAYING'||state.mode==='SHOP'||state.lock||state.tut||state.forceHome)return;resetWorld();state.speed=CONFIG.baseSpeed;if(DEBUG_MAP>0)jumpToMap(DEBUG_MAP);else if(DEBUG_GATE)nearGate();state.mode='PLAYING';home.classList.remove('active');dead.classList.remove('active');hud.classList.add('visible');document.getElementById('distance').textContent='0';document.getElementById('levelToast').textContent=LEVELS[DEBUG_MAP].name;document.getElementById('levelToast').classList.add('show');setTimeout(()=>document.getElementById('levelToast').classList.remove('show'),1800);document.getElementById('vignette').classList.remove('on');document.getElementById('slowGrade').classList.remove('on');startMusic(true)}
 document.getElementById('goHome').addEventListener('click',()=>{showHomeBest()});
 /* TEST: respawn at the nearest forward D >= crash D + 10 where -16..+45 m and |dx| <= 8 around x hold no solid (risers included);
    x starts at the crash x and is shifted in 2-unit steps up to +-40 before D moves on */
@@ -69,7 +69,7 @@ function findSafeSpot(fromD,fromX){
   }
   return {D:fromD,x:fromX}
 }
-function continueRun(){
+function continueRun(){if(state.forceHome)return;
   if(state.mode!=='DEAD')return;
   clearCrash();clearMeteors();hideGateUI();
   const spot=findSafeSpot(state.distance+10,state.x),Dc=spot.D;
@@ -183,12 +183,13 @@ function updateRollSystem(dt,axis,handling){
   /* bank fades out as the wing goes vertical; yaw grows a little so the nose still leads the turn */
   s.rollSteer=steer;return {steer,slip,bankMul:1-.8*k,yawMul:1+.9*k,extra:s.tumble+wobble};
 }
-let last=performance.now(),accum=0;function updatePlay(dt){const wd=dt*state.worldScale,keyAxis=(keys.has('arrowleft')||keys.has('a')?-1:0)+(keys.has('arrowright')||keys.has('d')?1:0),axis0=THREE.MathUtils.clamp(keyAxis+touchAxis,-1,1),stats=PLANES[save.equippedPlane],handling=1+(stats.handling-3)*.045,axis=state.tut?state.tut.axis(axis0):(state.apTimer>0?apAxis(dt,handling):axis0);const progress=state.distance/CONFIG.levelMeters,targetSpeed=state.tut?state.tut.speed:(state.arena?Math.min(36,speedAtDistance(state.arenaD0)):speedAtDistance(state.distance));state.speed=THREE.MathUtils.lerp(state.speed,targetSpeed,Math.min(1,wd*1.1));const rollSys=updateRollSystem(dt,axis,handling);state.vx+=(axis*rollSys.steer+rollSys.slip)*CONFIG.turnAccel*handling*dt+(state.extForce||0)*wd;state.vx*=Math.exp(-CONFIG.turnDamping*dt);state.vx=THREE.MathUtils.clamp(state.vx,-CONFIG.maxLateral,CONFIG.maxLateral);state.x+=state.vx*dt;state.bank=THREE.MathUtils.lerp(state.bank,-state.vx*.04,Math.min(1,dt*4.5));state.yaw=THREE.MathUtils.lerp(state.yaw,-state.vx*.014,Math.min(1,dt*3));state.distance+=state.speed*wd;state.worldZ+=state.speed*wd;state.worldClock+=wd;const idx=Math.min(LEVELS.length-1,Math.floor(progress));if(idx!==state.level&&!state.arena&&(idx<PERP_IDX||state.perpOK||state.level>=PERP_IDX))startLevelTransition(idx);if(state.transition<1)state.transition=Math.min(1,state.transition+wd/CONFIG.transitionSeconds);const diff=Math.max(0,(state.distance-state.levelStart)/CONFIG.levelMeters);plane.position.x=state.x;plane.position.y=CONFIG.baseAltitude+Math.sin(state.distance*.035)*.12+Math.sin(state.distance*.011)*.16;plane.rotation.set(0,state.yaw*rollSys.yawMul,state.bank*rollSys.bankMul+state.roll+rollSys.extra);if(prop1)prop1.rotation.z+=dt*state.speed*2.2;if(prop2)prop2.rotation.z+=dt*state.speed*2.2;if(!state.arena)streamChunks();if(state.shieldTimer<=0&&state.shieldSafety<=0&&planeCollides())burstCrash();else if(state.arena)updateArena(wd);else if(!state.tut){updateMeteorSpawns(wd);updateHazardSpawns(wd)}if(!state.arena){const dm=Math.floor(state.distance);if(dm!==state._dShown){state._dShown=dm;(window._distEl||(window._distEl=document.getElementById('distance'))).textContent=dm.toLocaleString()}}}
+let last=performance.now(),accum=0;function updatePlay(dt){const wd=dt*state.worldScale,keyAxis=(keys.has('arrowleft')||keys.has('a')?-1:0)+(keys.has('arrowright')||keys.has('d')?1:0),axis0=THREE.MathUtils.clamp(keyAxis+touchAxis,-1,1),stats=PLANES[save.equippedPlane],handling=1+(stats.handling-3)*.045,axis=state.tut?state.tut.axis(axis0):(state.apTimer>0?apAxis(dt,handling):axis0);const progress=state.distance/CONFIG.levelMeters,targetSpeed=state.tut?state.tut.speed:(state.arena?Math.min(36,speedAtDistance(state.arenaD0)):speedAtDistance(state.distance));state.speed=THREE.MathUtils.lerp(state.speed,targetSpeed,Math.min(1,wd*1.1));const rollSys=updateRollSystem(dt,axis,handling);state.vx+=(axis*rollSys.steer+rollSys.slip)*CONFIG.turnAccel*handling*dt+(state.extForce||0)*wd;state.vx*=Math.exp(-CONFIG.turnDamping*dt);state.vx=THREE.MathUtils.clamp(state.vx,-CONFIG.maxLateral,CONFIG.maxLateral);state.x+=state.vx*dt;state.bank=THREE.MathUtils.lerp(state.bank,-state.vx*.04,Math.min(1,dt*4.5));state.yaw=THREE.MathUtils.lerp(state.yaw,-state.vx*.014,Math.min(1,dt*3));state.distance+=state.speed*wd;state.worldZ+=state.speed*wd;state.worldClock+=wd;const idx=Math.min(LEVELS.length-1,Math.floor(progress));if(idx!==state.level&&!state.arena&&!state.tut&&(idx<PERP_IDX||state.perpOK||state.level>=PERP_IDX))startLevelTransition(idx);if(state.transition<1)state.transition=Math.min(1,state.transition+wd/CONFIG.transitionSeconds);const diff=Math.max(0,(state.distance-state.levelStart)/CONFIG.levelMeters);plane.position.x=state.x;plane.position.y=CONFIG.baseAltitude+Math.sin(state.distance*.035)*.12+Math.sin(state.distance*.011)*.16;plane.rotation.set(0,state.yaw*rollSys.yawMul,state.bank*rollSys.bankMul+state.roll+rollSys.extra);if(prop1)prop1.rotation.z+=dt*state.speed*2.2;if(prop2)prop2.rotation.z+=dt*state.speed*2.2;if(!state.arena)streamChunks();if(state.shieldTimer<=0&&state.shieldSafety<=0&&planeCollides())burstCrash();else if(state.arena)updateArena(wd);else if(!state.tut){updateMeteorSpawns(wd);updateHazardSpawns(wd)}if(!state.arena){const dm=Math.floor(state.distance);if(dm!==state._dShown){state._dShown=dm;(window._distEl||(window._distEl=document.getElementById('distance'))).textContent=dm.toLocaleString()}}}
 function updateHome(dt){state.homeTime+=dt;state.worldZ+=dt*2.1;plane.position.x=Math.sin(state.homeTime*.24)*2.2;state.x=plane.position.x;plane.position.y=3.6+Math.sin(state.homeTime*.8)*.18;plane.rotation.z=Math.sin(state.homeTime*.3)*.04;plane.rotation.y=Math.sin(state.homeTime*.19)*.045;if(prop1)prop1.rotation.z+=dt*14;if(prop2)prop2.rotation.z+=dt*14;streamChunks()}
 const lookTarget=new THREE.Vector3();function updateCamera(dt){if(state.mode!=='PLAYING'){const f=Math.exp(-dt*6);state.lossRoll*=f;state.ctrlShake*=f}if(cockpitActive()&&cockpit){cockpitCamera(dt);return}const homeMode=state.mode==='HOME',hangarMode=state.mode==='SHOP',x=hangarMode?0:state.x;const desiredX=hangarMode?0:x,desiredY=hangarMode?4.05:(homeMode?5.2:5.2+Math.abs(state.bank)*.35),desiredZ=hangarMode?2.5:(homeMode?10.8:10.5);camera.position.x=hangarMode?THREE.MathUtils.lerp(camera.position.x,desiredX,Math.min(1,dt*2.4)):x;camera.position.y=THREE.MathUtils.lerp(camera.position.y,desiredY,Math.min(1,dt*3));camera.position.z=THREE.MathUtils.lerp(camera.position.z,desiredZ,Math.min(1,dt*3));lookTarget.set(hangarMode?0:x,hangarMode?2.7:.5,hangarMode?-3:-13);camera.lookAt(lookTarget);if(state.gustRoll)camera.rotateZ(state.gustRoll);if(state.lossRoll)camera.rotateZ(state.lossRoll);if(state.pw>.001)camera.rotateZ(state.pw*(state.reduced?.17:.436)*(.75*Math.sin(state.clock*.55)+.25*Math.sin(state.clock*1.3)));const targetFov=(hangarMode?48:57)+(state.mode==='PLAYING'?Math.min(10,(state.speed-12.4)*.42):0)+(state.mode==='CRASHING'?4:0)+(1-state.worldScale)*5+(state.wellWarpS||0)*(state.reduced?4:15)+(state.pw||0)*(state.reduced?4:14)*Math.sin(state.clock*.9);camera.fov=THREE.MathUtils.lerp(camera.fov,targetFov,Math.min(1,dt*2));camera.near=.1;camera.updateProjectionMatrix();skyDome.position.copy(camera.position);ambient.position.x=x;sun.position.set(x-9,19,5);sun.target.position.set(x,0,0);sun.target.updateMatrixWorld();const sh=state.shake+state.rumble+state.ctrlShake;if(sh>0){camera.position.x+=(Math.random()-.5)*sh;camera.position.y+=(Math.random()-.5)*sh*.7}}
-function updateAmbient(dt){if(state.mode==='SHOP')return;const a=ambientGeo.attributes.position.array,scale=state.mode==='PLAYING'?state.worldScale:1,step=dt*scale,pt=LEVELS[state.level].particle;for(let i=0;i<ambientN;i++){let j=i*3;a[j+2]+=((state.mode==='PLAYING'?state.speed:2.1)+ambientSpeeds[i])*(state.mode==='PLAYING'?step:step*.25);a[j+1]+=pt==='snow'?-step*1.2:pt==='rain'?-step*(15+ambientSpeeds[i]*2):pt==='petals'?-step*.7+Math.sin(performance.now()*.0007+i)*step*.35:pt==='embers'?step*(2+ambientSpeeds[i]*.35):Math.sin(performance.now()*.0005+i)*step*.09;if(pt==='sand')a[j]+=step*(13+ambientSpeeds[i]*2);else if(pt==='rain')a[j]-=step*1.5;else if(pt==='petals')a[j]+=step*Math.sin(i)*.9;if(a[j]>29)a[j]-=58;else if(a[j]<-29)a[j]+=58;if(a[j+2]>18){a[j+2]=-145-Math.random()*20;a[j]=(Math.random()-.5)*58;a[j+1]=Math.random()*23-1}if(a[j+1]<-2)a[j+1]=pt==='rain'?23:20;if(a[j+1]>24)a[j+1]=-1.5}ambientGeo.attributes.position.needsUpdate=true;}
+function updateAmbient(dt){if(state.mode==='SHOP')return;const a=ambientGeo.attributes.position.array,scale=state.mode==='PLAYING'?state.worldScale:1,step=dt*scale,pt=LEVELS[state.level].particle,tms=performance.now(),ambN=Math.floor(ambientN*FXQ.amb);for(let i=0;i<ambN;i++){let j=i*3;a[j+2]+=((state.mode==='PLAYING'?state.speed:2.1)+ambientSpeeds[i])*(state.mode==='PLAYING'?step:step*.25);a[j+1]+=pt==='snow'?-step*1.2:pt==='rain'?-step*(15+ambientSpeeds[i]*2):pt==='petals'?-step*.7+Math.sin(tms*.0007+i)*step*.35:pt==='embers'?step*(2+ambientSpeeds[i]*.35):Math.sin(tms*.0005+i)*step*.09;if(pt==='sand')a[j]+=step*(13+ambientSpeeds[i]*2);else if(pt==='rain')a[j]-=step*1.5;else if(pt==='petals')a[j]+=step*Math.sin(i)*.9;if(a[j]>29)a[j]-=58;else if(a[j]<-29)a[j]+=58;if(a[j+2]>18){a[j+2]=-145-Math.random()*20;a[j]=(Math.random()-.5)*58;a[j+1]=Math.random()*23-1}if(a[j+1]<-2)a[j+1]=pt==='rain'?23:20;if(a[j+1]>24)a[j+1]=-1.5}ambientGeo.attributes.position.needsUpdate=true;}
 const _trailV=new THREE.Vector3();function updateTrails(){plane.updateMatrixWorld(true);for(const t of trailLines){const arr=t.line.geometry.attributes.position.array,anchor=wingWakeAnchors[t.s<0?0:1];for(let i=0;i<30;i++){const q=i/29,p=_trailV.set(anchor[0],anchor[1]+q*.09,anchor[2]+q*(CONFIG.trailLength/Math.max(.01,plane.scale.x)));plane.localToWorld(p);arr[i*3]=p.x;arr[i*3+1]=p.y;arr[i*3+2]=p.z}t.line.geometry.attributes.position.needsUpdate=true;trailMat.opacity=state.mode==='PLAYING'?Math.min(.58,.2+state.speed*.018):.14}}
-function updateFlames(dt){const flying=state.mode==='PLAYING'||state.mode==='CUT1'||state.mode==='CUT2',throttle=flying?.3+.7*clampN((state.speed-CONFIG.baseSpeed)/(CONFIG.maxSpeed-CONFIG.baseSpeed),0,1):0,idle=state.mode==='HOME'?.17:state.mode==='SHOP'?.1:0,now=performance.now()*.001;for(const f of jetFlames){const flick=1+Math.sin(now*23+f.base*19)*.105+Math.sin(now*47+f.base*7)*.045,power=idle+throttle*(f.kind==='outer'?.95:.78),len=f.base*power*flick,width=(f.kind==='outer'?.58:.76)*flick;f.mesh.scale.set(width,Math.max(.001,len),width);f.mesh.position.z=.02+(f.kind==='outer'?.46:.265)*len;f.mesh.material.opacity=(f.kind==='outer'?.66:.9)*power}plane.updateMatrixWorld(true);const qLocal=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),Math.PI/2);for(const item of jetWakeMeshes){const {mesh,emitter,index}=item;if(!flying||!throttle){mesh.visible=false;continue}const nozzle=plane.localToWorld(emitter.clone()),forward=plane.localToWorld(emitter.clone().add(new THREE.Vector3(0,0,1))).sub(nozzle).normalize(),fade=1-index/12,dist=.24+index*.24,sway=Math.sin(now*19+index*1.7)*.035*fade;mesh.position.copy(nozzle).addScaledVector(forward,dist).add(new THREE.Vector3(Math.cos(now*11+index)*sway,Math.sin(now*13+index*.8)*sway,0));mesh.quaternion.copy(plane.quaternion).multiply(qLocal);mesh.scale.set(.7*fade,fade,.7*fade);mesh.material.opacity=throttle*.46*fade;mesh.visible=mesh.material.opacity>.018}}
+const _fFwd=new THREE.Vector3(),_fN=new THREE.Vector3(),_qFlame=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),Math.PI/2),_moonOff=new THREE.Vector3(-19,15,-76);
+function updateFlames(dt){const flying=state.mode==='PLAYING'||state.mode==='CUT1'||state.mode==='CUT2',throttle=flying?.3+.7*clampN((state.speed-CONFIG.baseSpeed)/(CONFIG.maxSpeed-CONFIG.baseSpeed),0,1):0,idle=state.mode==='HOME'?.17:state.mode==='SHOP'?.1:0,now=performance.now()*.001;for(const f of jetFlames){const flick=1+Math.sin(now*23+f.base*19)*.105+Math.sin(now*47+f.base*7)*.045,power=idle+throttle*(f.kind==='outer'?.95:.78),len=f.base*power*flick,width=(f.kind==='outer'?.58:.76)*flick;f.mesh.scale.set(width,Math.max(.001,len),width);f.mesh.position.z=.02+(f.kind==='outer'?.46:.265)*len;f.mesh.material.opacity=(f.kind==='outer'?.66:.9)*power}/* plane.matrixWorld is already fresh: updateTrails() runs right before this and calls plane.updateMatrixWorld(true) */_fFwd.set(0,0,1).transformDirection(plane.matrixWorld);for(const item of jetWakeMeshes){const {mesh,emitter,index}=item;if(!flying||!throttle){mesh.visible=false;continue}const nozzle=_fN.copy(emitter).applyMatrix4(plane.matrixWorld),fade=1-index/12,dist=.24+index*.24,sway=Math.sin(now*19+index*1.7)*.035*fade;mesh.position.copy(nozzle).addScaledVector(_fFwd,dist);mesh.position.x+=Math.cos(now*11+index)*sway;mesh.position.y+=Math.sin(now*13+index*.8)*sway;mesh.quaternion.copy(plane.quaternion).multiply(_qFlame);mesh.scale.set(.7*fade,fade,.7*fade);mesh.material.opacity=throttle*.46*fade;mesh.visible=mesh.material.opacity>.018}}
 const wellFxEl=document.getElementById('wellFx'),wellV=new THREE.Vector3(),wellV2=new THREE.Vector3();let wellFxOn=false;
 function applyWellWarp(dt){
   const tgt=state.mode==='PLAYING'?(state.wellWarp||0):0,cur=state.wellWarpS||0;
@@ -209,11 +210,44 @@ function applyWellWarp(dt){
   wellFxEl.style.setProperty('--wx',sx.toFixed(1)+'%');wellFxEl.style.setProperty('--wy',sy.toFixed(1)+'%');wellFxEl.style.setProperty('--wa',((state.clock*40)%360).toFixed(1)+'deg');wellFxEl.style.opacity=clampN(w*1.1,0,1).toFixed(3)
 }
 function frame(now){requestAnimationFrame(frame);const raw=Math.min(.05,(now-last)/1000);last=now;const dt=raw;accum+=dt;
- if(state.mode!=='PAUSED')state.clock+=dt;if(state.mode==='HOME')updateHome(dt);if(state.mode==='SHOP'){state.homeTime+=dt;plane.rotation.y+=dt*.22;plane.position.y=3.05+Math.sin(state.homeTime*1.1)*.12;const shopTx=state.shopTab==='abilities'&&innerWidth>900?-1.5:0;plane.position.x+=(shopTx-plane.position.x)*Math.min(1,dt*4);shieldBubble.visible=state.shopTab==='abilities';if(shieldBubble.visible){shieldBubble.position.copy(plane.position);shieldBubble.scale.setScalar(.42);shieldBubble.rotation.y=state.homeTime*.28;shieldBubble.material.uniforms.uAlpha.value=save.abilities.shield?.34:.2}if(state.hangarPulse>0)state.hangarPulse=Math.max(0,state.hangarPulse-dt);for(const m of planeParts)if(m.material?.emissive){m.material.emissive.setRGB(1,.78,.58);m.material.emissiveIntensity=state.hangarPulse*1.1}}if(state.mode==='PLAYING'){updateAbilities(dt);updatePlay(dt);if(state.tut&&state.mode==='PLAYING')state.tut.update(dt)}if(state.mode==='PLAYING'&&!state.gatePassed&&state.distance>=GATE_D){state.gatePassed=true;startCut1()}if(state.mode==='CRASHING')updateCrash(dt);if(state.mode==='PLAYING'||state.mode==='CRASHING')updateRisers();if(state.mode==='PLAYING')updateDynamics(dt*state.worldScale);if(state.terrainAnim)updateTerrain();if(state.mode==='PLAYING'||state.mode==='CRASHING'||state.mode==='DEAD')updateMeteors(dt*(state.mode==='PLAYING'?state.worldScale:1),state.mode==='PLAYING');if(state.mode!=='SHOP')pumpBuildQueue();blendVisuals(dt);updatePerplexityFx(dt);updateAmbient(dt);updateTrails();updateFlames(dt);ckFrame(dt);updateCamera(dt);updateAudio();const mT=state.transition,mFrom=LEVELS[state.fromLevel],mTo=LEVELS[state.toLevel],mw=(mFrom.moon?1-mT:0)+(mTo.moon?mT:0),cw=(mFrom.corona?1-mT:0)+(mTo.corona?mT:0),mcol=mTo.moon||mFrom.moon;if(mcol)moonMat.color.set(mcol);moonMat.opacity=Math.min(1,mw);moon.position.copy(camera.position).add(new THREE.Vector3(-19,15,-76));corona.position.copy(moon.position);corona.lookAt(camera.position);corona.visible=moon.visible&&cw>.01;coronaMatA.opacity=Math.min(1,cw)*.75;coronaMatB.opacity=Math.min(1,cw)*.2;updateCinematics(dt);if(state.mode!=='PAUSED')updateFx(dt*(state.mode==='PLAYING'?state.worldScale:1));applyWellWarp(dt);shieldBubble.material.uniforms.uTime.value=performance.now()*.001;adaptRes(raw);renderer.render(scene,camera);}
-/* ADAPTIVE RESOLUTION: if the frame time stays high, render fewer pixels (the main cost on weak GPUs); if there is headroom, climb back up */
-let _ft=16.7,_adaptCool=2;function adaptRes(dt){if(state.mode==='PAUSED'||document.hidden)return;_ft+=(dt*1000-_ft)*.05;_adaptCool-=dt;if(_adaptCool>0)return;let next=curDpr;
-  if(_ft>24&&curDpr>.85)next=Math.max(.85,curDpr-.1);else if(_ft<13.5&&curDpr<PERF.maxDpr)next=Math.min(PERF.maxDpr,curDpr+.1);
-  if(Math.abs(next-curDpr)>.01){curDpr=next;renderer.setPixelRatio(curDpr);renderer.setSize(innerWidth,innerHeight);_adaptCool=4;_ft=16.7}}
+ if(state.mode!=='PAUSED')state.clock+=dt;if(state.mode==='HOME')updateHome(dt);if(state.mode==='SHOP'){state.homeTime+=dt;plane.rotation.y+=dt*.22;plane.position.y=3.05+Math.sin(state.homeTime*1.1)*.12;const shopTx=state.shopTab==='abilities'&&innerWidth>900?-1.5:0;plane.position.x+=(shopTx-plane.position.x)*Math.min(1,dt*4);shieldBubble.visible=state.shopTab==='abilities';if(shieldBubble.visible){shieldBubble.position.copy(plane.position);shieldBubble.scale.setScalar(.42);shieldBubble.rotation.y=state.homeTime*.28;shieldBubble.material.uniforms.uAlpha.value=save.abilities.shield?.34:.2}if(state.hangarPulse>0)state.hangarPulse=Math.max(0,state.hangarPulse-dt);for(const m of planeParts)if(m.material?.emissive){m.material.emissive.setRGB(1,.78,.58);m.material.emissiveIntensity=state.hangarPulse*1.1}}if(state.mode==='PLAYING'){updateAbilities(dt);updatePlay(dt);if(state.tut&&state.mode==='PLAYING')state.tut.update(dt)}if(state.mode==='PLAYING'&&!state.gatePassed&&state.distance>=GATE_D){state.gatePassed=true;startCut1()}if(state.mode==='CRASHING'||state.mode==='DEAD')updateCrash(dt);if(state.mode==='PLAYING'||state.mode==='CRASHING')updateRisers();if(state.mode==='PLAYING')updateDynamics(dt*state.worldScale);if(state.terrainAnim)updateTerrain();if(state.mode==='PLAYING'||state.mode==='CRASHING'||state.mode==='DEAD')updateMeteors(dt*(state.mode==='PLAYING'?state.worldScale:1),state.mode==='PLAYING');if(state.mode!=='SHOP')pumpBuildQueue();blendVisuals(dt);updatePerplexityFx(dt);updateAmbient(dt);updateTrails();updateFlames(dt);ckFrame(dt);updateCamera(dt);updateAudio();const mT=state.transition,mFrom=LEVELS[state.fromLevel],mTo=LEVELS[state.toLevel],mw=(mFrom.moon?1-mT:0)+(mTo.moon?mT:0),cw=(mFrom.corona?1-mT:0)+(mTo.corona?mT:0),mcol=mTo.moon||mFrom.moon;if(mcol)moonMat.color.set(mcol);moonMat.opacity=Math.min(1,mw);moon.position.copy(camera.position).add(_moonOff);corona.position.copy(moon.position);corona.lookAt(camera.position);corona.visible=moon.visible&&cw>.01;coronaMatA.opacity=Math.min(1,cw)*.75;coronaMatB.opacity=Math.min(1,cw)*.2;updateCinematics(dt);if(state.mode!=='PAUSED')updateFx(dt*(state.mode==='PLAYING'?state.worldScale:1));applyWellWarp(dt);shieldBubble.material.uniforms.uTime.value=performance.now()*.001;adaptRes(raw);renderer.render(scene,camera);}
+/* ADAPTIVE QUALITY v2.
+   Old scaler: DPR only went UP when frame time < 13.5 ms, which a 60 Hz screen can never reach (it is locked to ~16.7), so after any dip it never recovered, and it
+   changed the pixel ratio in 0.1 steps (every setSize reallocates the canvas = a hitch). Now:
+   - one ladder of "degrade levels" (_lv): 1 = cheaper particles, then step the pixel ratio down through DPR_STEPS, last rung = shadows off (one way, it recompiles shaders)
+   - going down needs ~1.2 s of slow frames; going up needs ~6 s of headroom WHILE PLAYING, and every climb is a probe: if it turns slow within 5 s we step back down
+     and lock that level out for 30 s (doubling each failed probe, max 2 min), so it can't oscillate
+   - only HOME / SHOP / PLAYING frames count (crash hit-stop, cutscenes and the boot warm-up are ignored)
+   - the target is a fixed 60 fps (_vs = 16.7 ms), so 120 Hz screens are not pushed to chase 120 and a GPU-bound 30 fps device can't be mistaken for a 30 Hz screen
+   Inspect it live from the console with __perf(). */
+const DPR_STEPS=(()=>{const s=[.85,1,1.25,1.5,1.75,2].filter(v=>v<PERF.maxDpr-.01);s.push(PERF.maxDpr);return s})();
+const DPR_START=(()=>{let k=0;for(let i=0;i<DPR_STEPS.length;i++)if(DPR_STEPS[i]<=PERF.startDpr+.01)k=i;return k})();
+let _lv=0,_ema=16.7,_vs=16.7,_slowT=0,_fastT=0,_cool=3,_probe=0,_lockDur=30,_skipT=2,_shadowOff=false,_clk=0;const _lock={};
+const _lvMin=()=>-(DPR_STEPS.length-1-DPR_START),_lvMax=()=>1+DPR_START+(PERF.shadows&&!_shadowOff?1:0);
+const _dprFor=lv=>DPR_STEPS[Math.max(0,Math.min(DPR_STEPS.length-1,lv<=0?DPR_START-lv:DPR_START-(lv-1)))];
+function applyQuality(){
+  const d=_dprFor(_lv),cheap=_lv>=1;
+  FXQ.amb=cheap?.6:1;FXQ.cap=cheap?.6:1;ambientGeo.setDrawRange(0,Math.floor(ambientN*FXQ.amb));
+  if(Math.abs(d-curDpr)>.01){curDpr=d;renderer.setPixelRatio(curDpr);renderer.setSize(innerWidth,innerHeight)}
+  if(!_shadowOff&&PERF.shadows&&_lv>=2+DPR_START){_shadowOff=true;renderer.shadowMap.enabled=false;sun.castShadow=false;_lv=Math.min(_lv,_lvMax())}
+}
+function adaptRes(dt){
+  if(state.mode==='PAUSED'||document.hidden){_slowT=_fastT=0;return}
+  _clk+=dt;if(_skipT>0){_skipT-=dt;return}
+  const mode=state.mode;if(mode!=='PLAYING'&&mode!=='HOME'&&mode!=='SHOP'){_slowT=_fastT=0;return}
+  const ms=dt*1000;
+  _ema+=(Math.min(ms,_vs*3)-_ema)*.06;_cool-=dt;if(_probe>0){_probe-=dt;if(_probe<=0)_lockDur=30}
+  _slowT=_ema>_vs*1.45?_slowT+dt:Math.max(0,_slowT-dt*2);_fastT=(_ema<_vs*1.1&&mode==='PLAYING')?_fastT+dt:0;
+  if(_slowT>(_probe>0?.5:1.2)&&_cool<=0&&_lv<_lvMax()){
+    if(_probe>0){_lock[_lv]=_clk+_lockDur;_lockDur=Math.min(120,_lockDur*2)}
+    _lv++;_cool=2.5;_slowT=_fastT=0;_probe=0;_ema=_vs;applyQuality()
+  }else if(_fastT>6&&_cool<=0&&_lv>_lvMin()&&(_lock[_lv-1]||0)<=_clk){
+    _lv--;_cool=4;_slowT=_fastT=0;_probe=5;_ema=_vs;applyQuality()
+  }
+}
+window.__perf=()=>({level:_lv,dpr:curDpr,steps:DPR_STEPS,frameMs:+_ema.toFixed(1),budgetMs:+_vs.toFixed(1),particles:{ambient:FXQ.amb,fx:FXQ.cap},shadowsDroppedForSession:_shadowOff,locks:{..._lock},now:+_clk.toFixed(1)});
+/* compile every hazard shader once at boot (behind the home screen) so none of them compiles mid-run. waits if a run is already going. */
+setTimeout(function warm(){if(state.mode==='PLAYING'||state.mode==='CRASHING'){setTimeout(warm,2000);return}warmUpHazards();_skipT=3;_ema=_vs},400);
 requestAnimationFrame(frame);
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setPixelRatio(curDpr);renderer.setSize(innerWidth,innerHeight)});
 
@@ -272,9 +306,10 @@ window.addEventListener('keydown',e=>{
 })();
 
 /* ---------- INTERACTIVE TUTORIAL FLIGHT ----------
-   First visit: welcome scene -> the plane flies itself -> two short beats that only move on once you have done them:
-   1) a big block ahead: steer around it, 2) a solid wall: raise the Shield. Then a guided tour of the shop.
-   Checkpoints are fixed distances (never "wherever the plane happens to be"), and after 3 crashes in a beat the obstacle is removed. */
+   First visit: a short welcome -> the plane flies and you steer from the first second -> two beats that only move on once you have done them:
+   1) a block ahead: steer around it, 2) a narrow gap: roll through it. Then you drop straight into your first real flight.
+   After your first real crash you are sent home and shown the hangar, abilities, statistics and achievements once (see the post-crash tour at the bottom).
+   Checkpoints are close to each obstacle; after 1 crash on the block you get a steering nudge, after 2 the obstacle is removed. */
 (()=>{
 const FLAG='farflight-tutorial-v2',$=id=>document.getElementById(id);
 const welcomeEl=$('welcome'),coach=$('coach'),coachCard=$('coachCard'),cTag=$('coachTag'),cTitle=$('coachTitle'),cText=$('coachText'),cKeys=$('coachKeys'),cNext=$('coachNext'),cSkip=$('coachSkip'),ring=$('coachRing'),skipFlight=$('tutSkipFlight'),fadeEl=$('tutFade'),welcomeSkip=$('welcomeSkip'),arrowsEl=$('tutArrows'),markEl=$('tutMark'),markTxt=$('tutMarkTxt');
@@ -392,9 +427,8 @@ function fade(to,sec){fadeEl.style.transition=`opacity ${sec}s ease`;fadeEl.styl
 const E={w:2.12,d:2.12,ox:0,oz:0,fm:1,riser:false},E_L={...E,ox:-1.16},E_R={...E,ox:1.16};   /* slit: 2.2 m wide - a level plane (2.3 m) cannot fit, a rolled one (1.3 m) can */
 /* obstacle rows are D and D+2 (odd D). far apart on purpose: room to read, think and line up */
 const COURSE=[
-  {id:'b1',kind:'wallR',D:61},{id:'b2',kind:'wallL',D:109},{id:'b3',kind:'block',D:157},
-  {id:'r1',kind:'slit',D:213},{id:'r2',kind:'slit',D:261},
-  {id:'sh',kind:'wall',D:317}
+  {id:'b1',kind:'block',D:111},
+  {id:'r1',kind:'slit',D:291}
 ];
 const mv=new THREE.Vector3();
 function solidAt(it,x){
@@ -408,8 +442,8 @@ function solidAt(it,x){
 }
 function isClear(it,x){return it.kind==='wallR'?x>=3.8:it.kind==='wallL'?x<=-3.8:Math.abs(x)>=4.2}
 function makeRun(){
-  const T={speed:15,id:'',stage:0,scale:1,cp:20,lock:false,timer:0,idle:0,done:false,next:null,delay:0,flag:false,fails:0,cleared:{},closing:false,origAbilities:null,granted:false,opts:null};
-  T.order=['intro',...COURSE.map(c=>c.id),'cam','finish'];
+  const T={speed:CONFIG.baseSpeed,id:'',stage:0,scale:1,cp:20,lock:false,timer:0,idle:0,done:false,next:null,delay:0,flag:false,fails:0,cleared:{},closing:false,origAbilities:null,granted:false,opts:null};
+  T.order=[...COURSE.map(c=>c.id),'finish'];
   T.entry=(ix,iz)=>{
     const D=19-2*iz,x=-19+2*ix;
     for(const it of COURSE){
@@ -428,30 +462,23 @@ const show=(T,o)=>{T.opts=o;coachShow(o)};
 const kSteerR=()=>touch?pill('HOLD RIGHT SIDE'):cap('D','d')+cap('→','arrowright');
 const kSteerL=()=>touch?pill('HOLD LEFT SIDE'):cap('←','arrowleft')+cap('A','a');
 const STAGE_UI={
-  b1:()=>({tag:'STEERING · 1 OF 3',title:'Swerve right',text:'The way around is on the right.',keys:kSteerR()}),
-  b2:()=>({tag:'STEERING · 2 OF 3',title:'Now swerve left',text:'This time the gap is on the left.',keys:kSteerL()}),
-  b3:()=>({tag:'STEERING · 3 OF 3',title:'Pick a side',text:touch?'Press and hold the left or right side of the screen.':'Go around the block either way.',keys:touch?pill('HOLD LEFT OR RIGHT SIDE'):cap('←','arrowleft')+cap('A','a')+'<span class="coach-or">or</span>'+cap('D','d')+cap('→','arrowright')}),
-  r1:()=>({tag:'ROLL · 1 OF 2',title:'Too narrow to fit flat',text:touch?'Touch the screen with two fingers to roll onto a wing, then slip through.':'Roll onto a wing, then slip through the gap.',keys:touch?pill('TWO FINGERS'):cap('Q','q')+cap('E','e')}),
-  r2:()=>({tag:'ROLL · 2 OF 2',title:'Roll again',text:touch?'Two fingers on the screen, then glide through.':'Same move: roll, then glide through.',keys:touch?pill('TWO FINGERS'):cap('Q','q')+cap('E','e')}),
-  sh:()=>({tag:'SHIELD',title:'A solid wall. Raise your Shield',text:touch?'Tap the glowing shield button below to pass straight through.':'Press Z to pass straight through it.',keys:touch?'':cap('Z','z')})
+  b1:()=>({tag:'STEERING',title:'Go around it',text:touch?'Press and hold the left or right side of the screen to steer around the block.':'Steer around the block. Either side works.',keys:touch?pill('HOLD LEFT OR RIGHT SIDE'):cap('←','arrowleft')+cap('A','a')+'<span class="coach-or">or</span>'+cap('D','d')+cap('→','arrowright')}),
+  r1:()=>({tag:'ROLL',title:'Too narrow to fit flat',text:touch?'Touch the screen with two fingers to roll onto a wing, then slip through.':'Roll onto a wing, then slip through the gap.',keys:touch?pill('TWO FINGERS'):cap('Q','q')+cap('E','e')})
 };
 function enter(T,id){
   T.id=id;T.stage=T.order.indexOf(id);T.done=false;T.timer=0;T.idle=0;T.lock=false;T.flag=false;T.fails=0;T.scale=.6;T.assist=null;
   const it=COURSE.find(c=>c.id===id);
-  if(id==='intro'){T.lock=true;T.scale=.3;show(T,{tag:'WELCOME ABOARD',title:'The plane flies itself',text:'You only steer. Take a moment, then we\'ll try it.',pos:'top'})}
-  else if(it){
-    T.cp=Math.max(20,it.D-26);
+  if(it){
+    T.cp=Math.max(20,it.D-55);
     if(it.kind==='slit')T.assist=0;
-    if(it.kind==='wall'){if(!save.abilities.shield){save.abilities.shield=1;T.granted=true}state.shieldCooldown=0;state.shieldTimer=0;renderAbilityHud()}
     show(T,STAGE_UI[id]())
   }
-  else if(id==='cam'){
-    T.scale=.35;T.cam0=!!state.cockpit;T.phase=0;setRing('#viewBtn');
-    show(T,{tag:'CAMERA',title:'Switch your view',text:touch?'Tap the view button in the corner to look from the cockpit.':'Press C, or use the view button, to look from the cockpit.',keys:touch?'':cap('C','c')})
+  else if(id==='finish'){
+    T.scale=.5;setRing('#viewBtn');
+    show(T,{tag:'WELL FLOWN',title:'Nicely flown',text:touch?'Starting your first real flight. Tip: tap the view button anytime to change camera.':'Starting your first real flight. Tip: press C anytime to change camera.',pos:'top'})
   }
-  else if(id==='finish'){T.scale=.5;show(T,{tag:'WELL FLOWN',title:'Nicely flown',text:'Next, a quick look at the shop and settings.',pos:'top'})}
 }
-function complete(T,label){if(T.done)return;T.done=true;T.fails=0;coachOk(label);if(T.id==='cam')setRing(null);arrowsEl.className='tut-arrows';markEl.classList.remove('show');T.delay=1.8;T.next=T.order[T.stage+1]}
+function complete(T,label){if(T.done)return;T.done=true;T.fails=0;coachOk(label);if(T.id==='cam')setRing(null);arrowsEl.className='tut-arrows';markEl.classList.remove('show');T.delay=1.1;T.next=T.order[T.stage+1]}
 function placeMark(rowD,text,on){
   if(!on){markEl.classList.remove('show');return}
   mv.set(0,11,state.worldZ-(rowD+1));mv.project(camera);
@@ -469,8 +496,7 @@ function tick(T,dt){
   let scale=T.scale,waiting=false;
   const it=COURSE.find(c=>c.id===T.id);
   if(!T.done&&!T.closing){
-    if(T.id==='intro'){T.timer+=dt;if(T.timer>3.6){T.done=true;T.next=T.order[1];T.delay=.3}}
-    else if(it){
+    if(it){
       const slowFrom=it.D-30,hold=it.D-12,commit=it.D-3.5;
       let ok=false;
       if(it.kind==='slit'){
@@ -479,39 +505,29 @@ function tick(T,dt){
         else if(r<.9&&D<commit){T.flag=false;cTitle.textContent=STAGE_UI[it.id]().title}
         ok=T.flag
       }else if(it.kind==='wall'){
-        if(state.shieldTimer>0)T.flag=true;else if(T.flag&&D<commit)T.flag=false;
+        T.flag=state.shieldTimer>0;
         if(!T.flag)state.shieldCooldown=0;
         ok=T.flag
       }else ok=isClear(it,state.x);
       if(T.cleared[it.id])ok=true;
-      if(D<slowFrom)scale=.6;else if(D<hold)scale=.45;else if(D<commit&&!ok){scale=.03;waiting=true}else scale=1;
+      scale=1;if(D>=it.D-70&&D<commit&&!ok)waiting=true;
       placeMark(it.D,MARK[it.kind],D<it.D-3);
-      if(waiting){
-        T.idle+=dt;
-        if(it.kind==='wallR')arrowsEl.className='tut-arrows show only-r';
-        else if(it.kind==='wallL')arrowsEl.className='tut-arrows show only-l';
-        else if(it.kind==='block')arrowsEl.className='tut-arrows show';
-        else arrowsEl.className='tut-arrows'
-      }else arrowsEl.className='tut-arrows';
+      if(waiting)T.idle+=dt;
+      arrowsEl.className='tut-arrows';
       if(D>it.D+8)complete(T,it.kind==='slit'?'Smooth':it.kind==='wall'?'Through':'Nice')
     }
-    else if(T.id==='cam'){
-      scale=.35;const cur=!!state.cockpit;
-      if(T.phase===0&&cur!==T.cam0){T.phase=1;cTitle.textContent='Now switch back';cText.innerHTML=touch?'Tap the view button again to return to the chase view.':'Press C again to return to the chase view.'}
-      else if(T.phase===1&&cur===T.cam0)complete(T,'Nice view')
-    }
-    else if(T.id==='finish'){T.timer+=dt;scale=.5;if(T.timer>4.5){T.closing=true;endFlight(true)}}
+    else if(T.id==='finish'){T.timer+=dt;scale=.5;if(T.timer>3.6){T.closing=true;endFlight(true)}}
   }
   if(!waiting)T.idle=0;
   coach.classList.toggle('nudge',T.idle>6);
-  state.worldScaleTarget=scale;
+  state.worldScaleTarget=1;
   document.getElementById('slowGrade')?.classList.remove('on')
 }
 function respawn(T){
   clearCrash();clearMeteors();
   T.fails++;
   const it=COURSE.find(c=>c.id===T.id);
-  if(it&&T.fails>=3)T.cleared[it.id]=true;
+  if(it&&T.fails>=2)T.cleared[it.id]=true;else if(it&&it.kind==='block'&&T.fails===1)T.assist=(Math.random()<.5?-1:1)*5.5;
   state.distance=state.worldZ=T.cp;state.x=0;state.vx=0;state.bank=0;state.yaw=0;state.speed=T.speed;
   state.timeScale=1;state.crashElapsed=0;state.hitTimer=0;state.shake=0;state.rumble=0;state.shieldTimer=0;state.shieldSafety=0;
   state.shieldCooldown=0;state.worldScale=state.worldScaleTarget=1;
@@ -521,7 +537,7 @@ function respawn(T){
   T.flag=false;T.done=false;T.next=null;T.delay=0;T.idle=0;
   coach.classList.remove('ok');if(T.opts)coachShow(T.opts);
   const easy=!!(it&&T.cleared[it.id]);
-  cTag.textContent=easy?'NO WORRIES':'TRY AGAIN';if(easy)cTitle.textContent='We cleared the way';
+  cTag.textContent=easy?'NO WORRIES':'TRY AGAIN';if(easy)cTitle.textContent='We cleared the way';else if(it&&it.kind==='block'&&T.assist!==null)cTitle.textContent='We\'ll steer this one';
   document.getElementById('distance').textContent=Math.floor(T.cp).toLocaleString();
   fade(.9,.12);requestAnimationFrame(()=>requestAnimationFrame(()=>fade(0,.6)))
 }
@@ -533,9 +549,9 @@ function startFlight(){
   T.origAbilities={...save.abilities};save.abilities={shield:0,slow:0,autopilot:0};renderAbilityHud();
   home.classList.remove('active');welcomeEl.classList.remove('active');root.classList.remove('ff-first');
   resetWorld();state.speed=T.speed;state.mode='PLAYING';
-  hud.classList.add('visible');document.getElementById('distance').textContent='0';
+  hud.classList.add('visible');{const dc=document.querySelector('#hud .distance');if(dc)dc.style.display='none'}document.getElementById('distance').textContent='0';
   document.getElementById('vignette').classList.remove('on');document.getElementById('slowGrade').classList.remove('on');
-  skipFlight.classList.add('show');startMusic(true);enter(T,'intro')
+  skipFlight.classList.add('show');startMusic(true);enter(T,T.order[0])
 }
 function endFlight(completed){
   const T=state.tut;if(!T)return;T.closing=true;coachHide();skipFlight.classList.remove('show');fade(1,.7);
@@ -543,10 +559,10 @@ function endFlight(completed){
     if(state.shieldTimer>0)finishAbility('shield');
     state.tut=null;save.abilities=T.origAbilities;renderAbilityHud();
     resetWorld();state.mode='HOME';stopMusic();
-    hud.classList.remove('visible');home.classList.add('active');
+    hud.classList.remove('visible');{const dc=document.querySelector('#hud .distance');if(dc)dc.style.display=''}if(!completed)home.classList.add('active');
     document.getElementById('vignette').classList.remove('on');document.getElementById('slowGrade').classList.remove('on');
     markSeen();fade(0,.9);
-    if(completed)setTimeout(startTour,700)
+    if(completed)startRun()
   },750)
 }
 skipFlight.addEventListener('click',()=>endFlight(false));
@@ -558,7 +574,7 @@ function beginWelcome(){
   welcomeEl.classList.add('active');
   const wake=()=>{try{if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume()}catch{}};
   window.addEventListener('pointerdown',wake,{once:true});window.addEventListener('keydown',wake,{once:true});
-  welcomeTimer=setTimeout(()=>{state.lock=false;startFlight()},4400)
+  welcomeTimer=setTimeout(()=>{state.lock=false;startFlight()},2200)
 }
 function skipWelcome(){
   clearTimeout(welcomeTimer);state.lock=false;markSeen();welcomeEl.classList.remove('active');home.classList.add('active')
@@ -571,22 +587,20 @@ const settingsEl=$('settings'),settingsOpen=()=>!!(settingsEl&&settingsEl.classL
 let settingsTouched=false;
 if(settingsEl)settingsEl.addEventListener('input',()=>{settingsTouched=true});
 const tap=touch?'Tap':'Click';
+const achOpen=()=>{const t=$('sxTabAch');return !!t&&t.getAttribute('aria-selected')==='true'};
 const TOUR=[
-  {mode:'HOME',target:'#homeShop',tag:'THE SHOP',title:'Spend what you earn',text:`Credits from every flight buy abilities and aircraft. ${tap} the shop button.`,done:()=>state.mode==='SHOP'},
-  {mode:'SHOP',target:'.hangar-panel',fit:'abilities',tag:'ABILITIES',title:'Three tools for the sky',text:'Unlock and upgrade Shield, Slow-Mo and Autopilot here, then trigger them mid-flight.',next:'NEXT',shop:true},
-  {mode:'SHOP',target:'#planesTab',tag:'HANGAR',title:'Now the aircraft',text:`${tap} the Hangar tab to see your planes.`,shop:true,done:()=>state.shopTab==='hangar'},
-  {mode:'SHOP',target:'#planeRail',tag:'HANGAR',title:'Pick your plane',text:'Each aircraft handles and sees differently. '+tap+' one to preview it.',next:'NEXT',shop:true},
-  {mode:'SHOP',target:'#hangarBack',tag:'ALL SET',title:'Back to the runway',text:`${tap} Back when you are ready.`,shop:true,done:()=>state.mode==='HOME'},
-  {mode:'HOME',target:'#homeStats',tag:'STATISTICS',title:'Track your progress',text:`${tap} Statistics to see your flight record.`,done:statsOpen},
-  {mode:'HOME',target:'.stats-panel',tag:'STATISTICS',title:'Your flight record',text:'Your longest flight, lifetime distance and how many maps you have reached.',next:'NEXT',shop:true,needs:statsOpen,skipTo:'SETTINGS_I'},
-  {mode:'HOME',target:'#closeStats',tag:'STATISTICS',title:'Nicely done',text:`${tap} the ✕ to close it.`,shop:true,done:()=>!statsOpen()},
-  {mode:'HOME',target:'#openSettings',tag:'SETTINGS',title:'Make it yours',text:`${tap} Settings to adjust sound and display.`,done:settingsOpen},
-  {mode:'HOME',target:'#settings .settings-panel',fit:'settings',tag:'SETTINGS',title:'Try a slider',text:'Drag volume, brightness or contrast. Changes apply instantly.',next:'NEXT',shop:true,needs:settingsOpen,done:()=>settingsTouched},
-  {mode:'HOME',target:'#closeSettings',tag:'SETTINGS',title:'Almost done',text:`${tap} the ✕ to close settings.`,shop:true,done:()=>!settingsOpen()},
-  {mode:'HOME',target:'#homeHelp',tag:'NEED A REFRESHER?',title:'Help is always here',text:'The ? button in the top corner replays How to Play any time.',next:'NEXT',shop:true},
-  {mode:'HOME',target:'#play',tag:'READY',title:'Take flight',text:touch?'Tap TAKE FLIGHT to start your first real run.':'Click TAKE FLIGHT, or press Space, to start your first real run.',shop:true}
+  /* 0 */ {mode:'HOME',target:'#homeShop',tag:'THE SHOP',title:'Spend what you earned',text:`You collected credits on that flight. ${tap} Shop to spend them on abilities and aircraft.`,done:()=>state.mode==='SHOP'},
+  /* 1 */ {mode:'SHOP',target:'#planeRail',tag:'HANGAR',title:'Pick your plane',text:'Each aircraft handles and sees differently. '+tap+' one to preview it.',next:'NEXT',shop:true},
+  /* 2 */ {mode:'SHOP',target:'#abilitiesTab',tag:'ABILITIES',title:'Now the abilities',text:`${tap} the Abilities tab to see your tools.`,shop:true,done:()=>state.shopTab==='abilities'},
+  /* 3 */ {mode:'SHOP',target:'.hangar-panel',fit:'abilities',tag:'ABILITIES',title:'Three tools for the sky',text:'Unlock and upgrade Shield, Slow-Mo and Autopilot here, then trigger them mid-flight.',next:'NEXT',shop:true},
+  /* 4 */ {mode:'SHOP',target:'#hangarBack',tag:'ALL SET',title:'Back to the runway',text:`${tap} Back when you are ready.`,shop:true,done:()=>state.mode==='HOME'},
+  /* 5 */ {mode:'HOME',target:'#homeStats',tag:'STATISTICS',title:'Track your progress',text:`${tap} Statistics to see your flight record, what you have discovered, and your achievements.`,done:statsOpen},
+  /* 6 */ {mode:'HOME',target:'#sxTabAch',tag:'ACHIEVEMENTS',title:'Achievements pay credits',text:`${tap} the Achievements tab. Every achievement you unlock earns you credits.`,shop:true,needs:statsOpen,done:achOpen},
+  /* 7 */ {mode:'HOME',target:'.stats-panel',tag:'ACHIEVEMENTS',title:'Another way to earn',text:'Besides flying farther, you earn credits by completing achievements. Check back here as you fly.',next:'NEXT',shop:true,needs:statsOpen},
+  /* 8 */ {mode:'HOME',target:'#closeStats',tag:'STATISTICS',title:'Nicely done',text:`${tap} the ✕ to close it.`,shop:true,done:()=>!statsOpen()},
+  /* 9 */ {mode:'HOME',target:'#play',tag:'READY',title:'Take flight',text:touch?'Tap TAKE FLIGHT to start your next run.':'Click TAKE FLIGHT, or press Space, to start your next run.',shop:true}
 ];
-const STATS_I=5,SETTINGS_I=8,HELP_I=TOUR.length-2;
+const STATS_I=5,READY_I=TOUR.length-1;
 let tourI=-1,tourTimer=null,tourAdvance=false;
 function tourRender(){
   const st=TOUR[tourI];if(!st)return;tourAdvance=false;
@@ -596,19 +610,18 @@ function tourRender(){
 function tourTick(){
   const st=TOUR[tourI];if(!st)return;
   if(state.mode!==st.mode){
-    /* left the path: shop steps jump to settings once back home, anything else ends the tour */
+    /* left the path: leaving the shop continues with statistics; the first shop click moves on; anything else ends the tour */
     if(st.mode==='SHOP'&&state.mode==='HOME'){tourGo(STATS_I);return}
     if(st.mode==='HOME'&&state.mode==='SHOP'&&tourI===0){tourGo(1);return}
     endTour();return
   }
-  if(st.needs&&!st.needs()){tourGo(st.skipTo?SETTINGS_I:HELP_I);return}
+  if(st.needs&&!st.needs()){tourGo(READY_I);return}   /* stats closed early: skip to the last step */
   if(st.done&&st.done()||tourAdvance){tourGo(tourI+1)}
 }
 function tourGo(i){
   if(i>=TOUR.length){endTour();return}
   tourI=i;
-  if(i===1&&state.shopTab!=='abilities')setShopTab('abilities');
-  if(i===SETTINGS_I+1)settingsTouched=false;
+  if(i===1&&state.shopTab!=='hangar')setShopTab('hangar');
   tourRender()
 }
 function startTour(){
@@ -623,6 +636,29 @@ cSkip.addEventListener('click',endTour);
 window.farflightTutorial={replay(){if(state.mode==='HOME'&&!state.tut&&!state.lock){endTour();startFlight()}}};
 const forced=root.classList.contains('ff-first');
 if(forced)beginWelcome();
+
+/* ---- post-crash tour: shown once, the first time the player crashes in a real run. Forces them home, then walks hangar -> abilities -> statistics -> achievements ---- */
+const HINT='farflight-shop-hint-v1';
+let hintDone=false,hintPending=false;
+try{
+  hintDone=localStorage.getItem(HINT)==='1';
+  if(!forced&&!hintDone&&localStorage.getItem(FLAG)==='1'){hintDone=true;localStorage.setItem(HINT,'1')}   /* returning players already know the shop */
+}catch{}
+/* first crash: the only way forward is HOME. Fly Again / Continue are hidden (CSS) and startRun/continueRun are blocked while state.forceHome is set */
+new MutationObserver(()=>{
+  if(!dead.classList.contains('active')||hintDone||state.tut||state.forceHome)return;
+  hintPending=true;state.forceHome=true;dead.classList.add('ff-force-home');
+  coachShow({pos:'top',tag:'FIRST CRASH',title:'Crashes still pay',text:'You earned credits on that flight. Head home to spend them.'});setRing('#goHome')
+}).observe(dead,{attributes:true,attributeFilter:['class']});
+$('goHome').addEventListener('click',()=>{if(!state.forceHome)return;state.forceHome=false;dead.classList.remove('ff-force-home');coachHide()});
+setInterval(()=>{
+  if(hintDone||tourI>=0||state.tut||state.lock)return;
+  if(dead.classList.contains('active'))hintPending=true;
+  else if(hintPending&&state.mode==='HOME'&&home.classList.contains('active')&&!settingsOpen()&&!statsOpen()){
+    hintDone=true;try{localStorage.setItem(HINT,'1')}catch{}
+    startTour()
+  }
+},400);
 })();
 
 /* ---------- HOME TIPS: one tip at a time, a new one every 15 s ---------- */
@@ -661,27 +697,4 @@ setInterval(()=>{
 },15000)
 })();
 
-/* ---- statistics ---- */
-const STATS_KEY='farflight-stats-v1';
-function readStats(){try{const x=JSON.parse(localStorage.getItem(STATS_KEY)||'null');if(x&&typeof x==='object')return{maxMap:Math.max(0,Math.min(LEVELS.length-1,Number(x.maxMap)||0)),voidSeen:!!x.voidSeen}}catch{}return{maxMap:0,voidSeen:false}}
-function recordMap(m){const s=readStats();if(m==='void')s.voidSeen=true;else if(Number.isInteger(m)&&m>s.maxMap)s.maxMap=Math.min(m,LEVELS.length-1);else return;try{localStorage.setItem(STATS_KEY,JSON.stringify(s))}catch{}}
-(function(){
-  const panel=document.getElementById('stats'),btn=document.getElementById('homeStats');if(!panel||!btn)return;
-  const $=id=>document.getElementById(id),fmt=n=>Math.floor(n).toLocaleString()+' m';
-  const calm=()=>{try{return matchMedia('(prefers-reduced-motion: reduce)').matches}catch{return false}};
-  const count=(el,to,suffix,fmtFn)=>{if(calm()||to<=0){el.textContent=fmtFn(to);return}const t0=performance.now(),d=900;const f=t=>{const k=Math.min(1,(t-t0)/d),e=1-Math.pow(1-k,3);el.textContent=fmtFn(to*e);if(k<1&&panel.classList.contains('active'))requestAnimationFrame(f);else el.textContent=fmtFn(to)};requestAnimationFrame(f)};
-  const fill=()=>{
-    const st=readStats(),lm=(typeof CONFIG!=='undefined'&&CONFIG.levelMeters)||850;
-    const derived=Math.min(LEVELS.length-1,Math.floor((state.best||0)/lm));
-    const maxMap=Math.max(st.maxMap,derived),total=LEVELS.length;
-    count($('spBest'),state.best||0,'',fmt);count($('spLife'),save.lifetimeMeters||0,'',fmt);
-    $('spMaps').textContent=maxMap+1;$('spMapsOf').textContent=' / '+total;
-    $('spFurthest').textContent='Furthest: '+(st.voidSeen?'Event Horizon':LEVELS[maxMap].name);
-    const bar=$('spBar');bar.style.width='0%';requestAnimationFrame(()=>requestAnimationFrame(()=>{bar.style.width=((maxMap+1)/total*100)+'%'}));
-  };
-  const open=()=>{fill();panel.classList.add('active');panel.setAttribute('aria-hidden','false')};
-  const close=()=>{panel.classList.remove('active');panel.setAttribute('aria-hidden','true')};
-  btn.addEventListener('click',open);$('closeStats').addEventListener('click',close);
-  panel.addEventListener('click',e=>{if(e.target===panel)close()});
-  window.addEventListener('keydown',e=>{if(e.key==='Escape'&&panel.classList.contains('active'))close()});
-})();
+/* ---- statistics: moved to stats.js (flight record, discovered maps + hazards, achievements) ---- */

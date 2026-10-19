@@ -1,16 +1,169 @@
 // Crash effects and world hazards, including meteors and gravity wells.
-/* CRASH EFFECTS */
-let debris=[],crashParticles=[],popped=[];const debrisGeo=new THREE.BoxGeometry(.24,.24,.24);const smokeMat=new THREE.PointsMaterial({color:'#d7d6cd',size:1.1,transparent:true,opacity:.48,depthWrite:false});let smoke=null,smokeVel=[];const flash=document.getElementById('flash');
-function burstCrash(){apHide();stopMusic();setShieldHum(false);state.mode='CRASHING';state.hitTimer=CONFIG.crashHitStop;state.crashElapsed=0;state.timeScale=0;state.shake=.7;plane.updateMatrixWorld(true);for(const m of planeParts){const pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();m.getWorldPosition(pos);m.getWorldQuaternion(quat);m.getWorldScale(scale);scene.add(m);m.position.copy(pos);m.quaternion.copy(quat);m.scale.copy(scale);const vel=new THREE.Vector3((Math.random()-.5)*6,2+Math.random()*5,1+Math.random()*6);debris.push({mesh:m,vel,spin:new THREE.Vector3(Math.random()*7,Math.random()*7,Math.random()*7),bounced:false})}plane.visible=false;
- for(let i=0;i<76;i++){const mesh=new THREE.Mesh(debrisGeo,new THREE.MeshBasicMaterial({color:i%3===0?LEVELS[state.level].accent:LEVELS[state.level].palette[Math.floor(Math.random()*5)]}));mesh.position.set(plane.position.x+(Math.random()-.5)*1.8,plane.position.y+(Math.random()-.5)*1.5,plane.position.z+(Math.random()-.5)*1.8);scene.add(mesh);crashParticles.push({mesh,vel:new THREE.Vector3((Math.random()-.5)*11,Math.random()*9-1,Math.random()*10),life:.65+Math.random()*.8})}
- const ps=new Float32Array(30*3);smokeGeo.setAttribute('position',new THREE.BufferAttribute(ps,3));smoke=new THREE.Points(smokeGeo,smokeMat);smoke.position.copy(plane.position);smokeVel=[];for(let i=0;i<30;i++)smokeVel.push(new THREE.Vector3((Math.random()-.5)*.5,Math.random()*.9,.4+Math.random()));scene.add(smoke);flash.style.opacity='.84';setTimeout(()=>flash.style.opacity='0',150);crashSound();
- for(const ch of chunks)for(let i=0;i<ch.records.length;i++){const r=ch.records[i],wz=r.sourceZ+state.worldZ,dx=r.sourceX-plane.position.x,dz=wz;if(r.h>0&&Math.hypot(dx,dz)<CONFIG.blockPopRadius&&wz>-3&&wz<5){const len=Math.max(.1,Math.hypot(dx,dz));popped.push({chunk:ch,index:i,record:r,base:r.h,vel:2+Math.random()*5,dx:dx/len,dz:dz/len})}}}
-const smokeGeo=new THREE.BufferGeometry();
-function updateCrash(dt){state.crashElapsed+=dt;if(state.hitTimer>0){state.hitTimer-=dt;return}state.timeScale=THREE.MathUtils.lerp(state.timeScale,1,Math.min(1,dt/CONFIG.slowMoEase));for(const d of debris){const step=dt*state.timeScale;d.vel.y-=CONFIG.crashPieceGravity*step;d.mesh.position.addScaledVector(d.vel,step);d.mesh.rotation.x+=d.spin.x*step;d.mesh.rotation.y+=d.spin.y*step;if(!d.bounced&&d.mesh.position.y<.32){d.mesh.position.y=.32;d.vel.y=Math.abs(d.vel.y)*.25;d.vel.multiplyScalar(.58);d.bounced=true}}
- for(let i=crashParticles.length-1;i>=0;i--){const p=crashParticles[i];p.life-=dt;p.vel.y-=8*dt;p.mesh.position.addScaledVector(p.vel,dt);p.mesh.rotation.x+=dt*4;if(p.life<0){scene.remove(p.mesh);p.mesh.geometry.dispose();p.mesh.material.dispose();crashParticles.splice(i,1)}}if(smoke){const arr=smoke.geometry.attributes.position.array;for(let i=0;i<30;i++){const v=smokeVel[i];arr[i*3]+=v.x*dt;arr[i*3+1]+=v.y*dt;arr[i*3+2]+=v.z*dt}smoke.geometry.attributes.position.needsUpdate=true;smokeMat.opacity=Math.max(0,.48-state.crashElapsed*.24)}for(const p of popped){const pop=Math.sin(Math.min(1,state.crashElapsed*5)*Math.PI);p.record.h=Math.min(p.base+pop*p.vel,p.base+4);p.record.offsetX=p.dx*pop*1.15;p.record.offsetZ=p.dz*pop*1.15;setChunkInstance(p.chunk,p.record);p.chunk.boxMesh.instanceMatrix.needsUpdate=true;p.chunk.spikeMesh.instanceMatrix.needsUpdate=true}
- state.shake=Math.max(0,state.shake-dt*1.6);if(state.crashElapsed>=CONFIG.crashDelay){finishCrash()}}
+/* ===== PERF: POOLS + WARM-UP =====
+   Hazard materials / geometries are built once and recycled (matGet/matPut, banks) instead of new + dispose on every spawn, so spawning a meteor,
+   bolt, geyser, well or beam allocates no GPU resources. warmUpHazards() (called once at boot from main.js) compiles every hazard shader up front,
+   so the first meteor / geyser / beam of a run never freezes the game while the driver compiles it. ===== */
+const FXQ={amb:1,cap:1};   /* quality scalers written by adaptRes() in main.js: share of ambient particles drawn / share of the fx particle cap */
+const FXC=[[1,.85,.45],[.8,.14,.02],[1,.92,.65],[1,.45,.1],[1,.85,.4],[.85,.15,.02],[1,.72,.26],[1,.96,.62],[1,.35,.06],[1,.62,.2],[.5,.06,.02],[1,.6,.15],[.7,.1,.02],[1,.8,.4],[1,.3,.05],[.55,.15,1],[1,.85,1]];   /* hoisted particle colour arrays (were allocated per particle) */
+const _mp=Object.create(null),_bank=Object.create(null),_lgPool=[],_sparkMats=new Map();
+const MAT_MAKE={
+  ov:()=>new THREE.MeshBasicMaterial({transparent:true,depthTest:false,depthWrite:false,fog:false,side:THREE.DoubleSide}),
+  addF:()=>new THREE.MeshBasicMaterial({transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,fog:false}),
+  addD:()=>new THREE.MeshBasicMaterial({transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,fog:false,side:THREE.DoubleSide}),
+  ln:()=>new THREE.LineBasicMaterial({transparent:true,depthTest:false,depthWrite:false,fog:false}),
+  wcore:()=>new THREE.MeshBasicMaterial({transparent:true,opacity:0,fog:false})
+};
+function matGet(key,color,opacity){const a=_mp[key];let m=a&&a.pop();if(!m){m=MAT_MAKE[key]();m.userData.pk=key}m.color.set(color);m.opacity=opacity;return m}
+function shGet(key,make){const a=_mp[key];let m=a&&a.pop();if(!m){m=make();m.userData.pk=key}const u=m.uniforms;if(u){if(u.alpha)u.alpha.value=0;if(u.glow)u.glow.value=0;if(u.ph)u.ph.value=0;if(u.time)u.time.value=0}return m}
+function matPut(m){const k=m&&m.userData&&m.userData.pk;if(k)(_mp[k]||(_mp[k]=[])).push(m);else if(m)m.dispose()}
+function bankGet(key,n,make){const a=_bank[key]||(_bank[key]=[]);if(a.length<n){const g=make();a.push(g);return g}return a[(Math.random()*a.length)|0]}
+function bankFill(key,n,make){const a=_bank[key]||(_bank[key]=[]);while(a.length<n)a.push(make())}
+function lineGeoGet(){let g=_lgPool.pop();if(!g){g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(6),3))}return g}
+function lineGeoPut(g){_lgPool.push(g)}
+function sparkMat(c){let m=_sparkMats.get(c);if(!m){m=new THREE.MeshBasicMaterial({color:c,fog:false});_sparkMats.set(c,m)}return m}
+const BOLT_BEAM_GEO=(()=>{const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(new Float32Array([0,.5,0,0,48,0]),3));return g})();
+function makeBoltGeo(lite){const top=(Math.random()-.5)*14,pts=[];for(let i=0;i<=14;i++){const q=i/14,jit=(i>0&&i<14)?5.5*(1-q*.4):0;pts.push(new THREE.Vector3(top*(1-q)+(Math.random()-.5)*jit,48*(1-q),(Math.random()-.5)*jit*.6))}const curve=new THREE.CatmullRomCurve3(pts);return {core:new THREE.TubeGeometry(curve,lite?16:42,.2,5,false),halo:new THREE.TubeGeometry(curve,lite?16:42,.75,6,false)}}
+/* ===== CRASH v2 =====================================================================================================
+   The aircraft splits into a few believable assemblies (fuselage, left / right wing, tail, propeller). Each one tumbles around its OWN
+   centre, bounces, skids and burns, trailing smoke. The impact itself is a fireball + embers + soot + a ground dust ring.
+   All particles are round soft sprites (two THREE.Points layers: additive fire, normal-blended smoke). No boxes, no square shards.
+   Everything lives in scene space; clearCrash() puts every part back on the plane. */
+let debris=[],popped=[];const debrisGeo=new THREE.BoxGeometry(.24,.24,.24);const flash=document.getElementById('flash');
+const FXQ_CRASH=()=>PERF.tier==='low'?.6:1;
+const _cv=new THREE.Vector3(),_cb=new THREE.Box3(),_cq=new THREE.Quaternion(),_fc=[0,0,0];
+const SMOKE_TINT=[1,.97,.94],DUST_TINT=[1,.9,.75];
+const CFX={fire:null,smoke:null};
+function makeFxLayer(n,additive){
+  const geo=new THREE.BufferGeometry(),attr=(name,k)=>{const a=new THREE.BufferAttribute(new Float32Array(n*k),k);a.setUsage(THREE.DynamicDrawUsage);geo.setAttribute(name,a);return a.array};
+  const L={n,list:[],geo,pos:attr('position',3),size:attr('aSize',1),col:attr('aCol',3),alp:attr('aAlpha',1),seed:attr('aSeed',1)};
+  geo.setDrawRange(0,0);
+  L.mat=new THREE.ShaderMaterial({transparent:true,depthWrite:false,fog:false,blending:additive?THREE.AdditiveBlending:THREE.NormalBlending,uniforms:{uScale:{value:700}},
+    vertexShader:`attribute float aSize;attribute vec3 aCol;attribute float aAlpha;attribute float aSeed;uniform float uScale;varying vec3 vC;varying float vA;varying float vS;
+void main(){vec4 mv=modelViewMatrix*vec4(position,1.);vC=aCol;vA=aAlpha;vS=aSeed;gl_PointSize=clamp(aSize*uScale/max(.5,-mv.z),0.,160.);gl_Position=projectionMatrix*mv;}`,
+    fragmentShader:`varying vec3 vC;varying float vA;varying float vS;
+void main(){vec2 q=gl_PointCoord*2.-1.;float d=dot(q,q);if(d>1.)discard;float a=1.-d;a*=a;a*=.82+.18*sin(q.x*4.+vS*40.)*sin(q.y*4.-vS*23.);gl_FragColor=vec4(vC,a*vA);}`});
+  L.pts=new THREE.Points(geo,L.mat);L.pts.frustumCulled=false;L.pts.renderOrder=4;scene.add(L.pts);   /* always in the scene with draw range 0, so its shader is compiled by the boot warm-up and never hitches the crash */
+  return L}
+CFX.smoke=makeFxLayer(340,false);CFX.fire=makeFxLayer(240,true);
+function fxSpawn(L,p){if(L.list.length>=L.n)return;p.age=0;p.seed=Math.random();L.list.push(p)}
+/* kind 0 = fire billow (white-yellow -> orange -> red, fades), 1 = ember spark (small, falls, bounces), 2 = smoke / dust (grey that lightens as it spreads) */
+function cxFire(x,y,z,vx,vy,vz,s0,s1,life,a0,drag=2.4,buoy=1.2){fxSpawn(CFX.fire,{kind:0,x,y,z,vx,vy,vz,s0,s1,life,a0,drag,buoy,grav:0,fi:.05})}
+function cxSpark(x,y,z,vx,vy,vz,s,life){fxSpawn(CFX.fire,{kind:1,x,y,z,vx,vy,vz,s0:s,s1:s,life,a0:1,drag:.5,buoy:0,grav:16,fi:.01})}
+function cxSmoke(x,y,z,vx,vy,vz,s0,s1,life,a0,c0=.08,c1=.26,tint=SMOKE_TINT,buoy=1.2,drag=1.3){fxSpawn(CFX.smoke,{kind:2,x,y,z,vx,vy,vz,s0,s1,life,a0,c0,c1,tr:tint[0],tg:tint[1],tb:tint[2],drag,buoy,grav:0,fi:.12})}
+function fireRamp(k,o){
+  if(k<.25){const t=k/.25;o[0]=1;o[1]=.96-.2*t;o[2]=.7-.4*t}
+  else if(k<.6){const t=(k-.25)/.35;o[0]=1;o[1]=.76-.36*t;o[2]=.3-.2*t}
+  else{const t=Math.min(1,(k-.6)/.4);o[0]=1-.55*t;o[1]=.4-.3*t;o[2]=.1-.07*t}}
+function stepFx(L,dt){
+  const list=L.list;let w=0;
+  for(let i=0;i<list.length;i++){
+    const p=list[i];p.age+=dt;if(p.age>=p.life)continue;
+    const dr=Math.exp(-p.drag*dt);p.vx*=dr;p.vy*=dr;p.vz*=dr;p.vy+=(p.buoy-p.grav)*dt;
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.z+=p.vz*dt;
+    if(p.grav&&p.y<.12){p.y=.12;p.vy=Math.abs(p.vy)*.3;p.vx*=.6;p.vz*=.6}
+    list[w++]=p}
+  list.length=w;
+  for(let i=0;i<w;i++){
+    const p=list[i],k=p.age/p.life,i3=i*3,fin=Math.min(1,p.age/p.fi);let r,g,b,a,s;
+    if(p.kind===0){fireRamp(k,_fc);r=_fc[0];g=_fc[1];b=_fc[2];a=p.a0*fin*Math.pow(1-k,1.4);s=p.s0+(p.s1-p.s0)*(1-Math.pow(1-k,2))}
+    else if(p.kind===1){fireRamp(Math.min(1,k*1.3),_fc);r=_fc[0];g=_fc[1];b=_fc[2];a=p.a0*(k<.6?1:(1-k)/.4);s=p.s0*(1-.5*k)}
+    else{const l=p.c0+(p.c1-p.c0)*k;r=l*p.tr;g=l*p.tg;b=l*p.tb;a=p.a0*fin*Math.pow(1-k,1.3);s=p.s0+(p.s1-p.s0)*(1-Math.pow(1-k,2))}
+    L.pos[i3]=p.x;L.pos[i3+1]=p.y;L.pos[i3+2]=p.z;L.col[i3]=r;L.col[i3+1]=g;L.col[i3+2]=b;L.alp[i]=a;L.size[i]=s;L.seed[i]=p.seed}
+  L.geo.setDrawRange(0,w);
+  const A=L.geo.attributes;A.position.needsUpdate=A.aSize.needsUpdate=A.aCol.needsUpdate=A.aAlpha.needsUpdate=A.aSeed.needsUpdate=true}
+function stepCrashFx(step){
+  const sc=renderer.domElement.height*.5/Math.tan(camera.fov*Math.PI/360);
+  CFX.fire.mat.uniforms.uScale.value=CFX.smoke.mat.uniforms.uScale.value=sc;
+  stepFx(CFX.smoke,step);stepFx(CFX.fire,step)}
+function randDir(o){const R=Math.random,u=R()*2-1,a=R()*6.2832,s=Math.sqrt(1-u*u);return o.set(s*Math.cos(a),u,s*Math.sin(a))}
+/* sparks + dust where a piece hits the ground. power 0..1 */
+function crashGroundFx(x,y,z,power){
+  const R=Math.random,q=FXQ_CRASH(),n=Math.round((4+power*9)*q);
+  for(let i=0;i<n;i++)cxSpark(x,y,z,(R()-.5)*8,2+R()*5*power+R()*2,(R()-.5)*8,.09+R()*.08,.35+R()*.5);
+  for(let i=0;i<2;i++)cxSmoke(x,y,z,(R()-.5)*3,.6+R(),(R()-.5)*3,.4,1.6,.9+R()*.5,.3,.5,.62,DUST_TINT,.4)}
+/* the explosion at the point of impact */
+function crashFireball(x,y,z){
+  const R=Math.random,q=FXQ_CRASH(),d=new THREE.Vector3(),soft=state.reduced?.55:1;
+  for(let i=0;i<3;i++)cxFire(x+(R()-.5)*.4,y+(R()-.5)*.3,z+(R()-.5)*.4,0,.5,0,2.2,5.2+R()*1.5,.24+R()*.08,soft,0,0);          /* hot core flash */
+  for(let i=0,n=Math.round(24*q);i<n;i++){randDir(d);const sp=1.5+R()*4.5;cxFire(x,y,z,d.x*sp,d.y*sp+2.2,d.z*sp,.7+R()*.6,2.4+R()*1.6,.4+R()*.5,.9*soft,2.6,1.4)}  /* fireball billows */
+  for(let i=0,n=Math.round(34*q);i<n;i++){randDir(d);const sp=5+R()*13;cxSpark(x,y,z,d.x*sp,d.y*sp*1.1+3,d.z*sp,.1+R()*.1,.5+R()*.9)}                                  /* embers */
+  for(let i=0,n=Math.round(34*q);i<n;i++){randDir(d);const sp=.8+R()*3;cxSmoke(x,y,z,d.x*sp,d.y*sp+1.5+R()*3,d.z*sp,.7+R()*.5,2.8+R()*1.8,1.8+R()*1.4,.5+R()*.2,.06+R()*.05,.22+R()*.1)}   /* smoke */
+  for(let i=0;i<6;i++){randDir(d);const sp=.6+R()*1.8;cxSmoke(x,y+.2,z,d.x*sp,Math.abs(d.y)*sp+1.8,d.z*sp,1.1,4.5,2.4+R()*.8,.55,.03,.12,SMOKE_TINT,1.6)}                      /* black soot */
+  for(let i=0,n=Math.round(14*q);i<n;i++){const a=i/n*6.2832+R()*.4,sp=2.5+R()*3;cxSmoke(x,.25,z,Math.cos(a)*sp,.3,Math.sin(a)*sp,.5,2,1+R()*.8,.32,.5,.62,DUST_TINT,.3,2)}   /* ground dust ring */
+}
+/* small burst where a piece snaps off the airframe */
+function crashJointFx(x,y,z){
+  const R=Math.random,d=new THREE.Vector3(),q=FXQ_CRASH();
+  for(let i=0,n=Math.round(5*q);i<n;i++){randDir(d);const sp=2+R()*6;cxSpark(x,y,z,d.x*sp,d.y*sp+2,d.z*sp,.09+R()*.07,.4+R()*.5)}
+  for(let i=0,n=Math.round(5*q);i<n;i++){randDir(d);const sp=.5+R()*1.5;cxSmoke(x,y,z,d.x*sp,d.y*sp+1,d.z*sp,.45,1.7,1.2+R()*.7,.5,.07,.24)}
+  for(let i=0;i<3;i++){randDir(d);cxFire(x,y,z,d.x*2,d.y*2+1,d.z*2,.5,1.5,.3+R()*.2,.8,2.6,1.2)}}
+function crashBBox(m){if(!m.geometry.boundingBox)m.geometry.computeBoundingBox();return m.geometry.boundingBox}
+function burstCrash(){
+  apHide();stopMusic();setShieldHum(false);state.mode='CRASHING';state.hitTimer=CONFIG.crashHitStop;state.crashElapsed=0;state.timeScale=0;state.shake=.8;
+  plane.updateMatrixWorld(true);plane.getWorldQuaternion(_cq);
+  const R=Math.random,sgn=()=>R()<.5?-1:1,svx=clampN(state.vx*.25,-4,4),G={body:[],wingL:[],wingR:[],tail:[],prop:[]};
+  /* sort every part into an assembly by where it sits on the airframe (plane-local centre) */
+  for(const m of planeParts){
+    let role='body';
+    if(m===prop1||m===prop2)role='prop';
+    else{crashBBox(m).getCenter(_cv).applyMatrix4(m.matrix);if(Math.abs(_cv.x)>.8)role=_cv.x<0?'wingL':'wingR';else if(_cv.z>1)role='tail'}
+    G[role].push(m)}
+  const box=new THREE.Box3(),tmp=new THREE.Box3(),size=new THREE.Vector3();
+  for(const role in G){
+    const ms=G[role];if(!ms.length)continue;
+    box.makeEmpty();for(const m of ms)box.union(tmp.copy(crashBBox(m)).applyMatrix4(m.matrixWorld));
+    box.getCenter(_cv);box.getSize(size);
+    const pivot=new THREE.Group();pivot.position.copy(_cv);pivot.quaternion.copy(_cq);scene.add(pivot);pivot.updateMatrixWorld(true);
+    for(const m of ms)pivot.attach(m);                       /* keeps the world transform, but now rotations happen around the assembly's own centre */
+    const side=role==='wingL'?-1:role==='wingR'?1:0;let c;
+    if(role==='body')c={vel:[(R()-.5)*2.4+svx,3.5+R()*2,.5+R()*2.5],spin:[2+R()*2.5,(R()-.5)*3,(R()-.5)*6],rad:.3,rest:.3,fire:2.5,smoke:26,flame:12};
+    else if(side)c={vel:[side*(2.2+R()*2.6)+svx,5+R()*3,.3+R()*3],spin:[1+R()*2,sgn()*(4+R()*4),side*(2+R()*3)],rad:.1,rest:.35,fire:1.2,smoke:16,flame:9};
+    else if(role==='tail')c={vel:[(R()-.5)*3+svx,5+R()*2.5,1.5+R()*3],spin:[sgn()*(3+R()*3),sgn()*(2+R()*3),sgn()*(3+R()*3)],rad:.16,rest:.3,fire:1.4,smoke:14,flame:7};
+    else c={vel:[sgn()*(2.5+R()*3)+svx,6.5+R()*2,-.5+R()*2],spin:[3+R()*3,sgn()*3,sgn()*(38+R()*14)],rad:.08,rest:.45,fire:.5,smoke:9,flame:0};   /* propeller: tears off and spins away like a frisbee */
+    debris.push({pivot,vel:new THREE.Vector3(...c.vel),spin:new THREE.Vector3(...c.spin),rad:c.rad,rest:c.rest,fire:c.fire,smokeRate:c.smoke,flameRate:c.flame,t:0,accS:0,accF:0,grounded:false,lastSpark:0});
+    if(role!=='body')crashJointFx(_cv.x,_cv.y,_cv.z)}
+  plane.visible=false;
+  crashFireball(plane.position.x,plane.position.y+.1,plane.position.z-.5);
+  stepCrashFx(.04);                                           /* pre-roll so the hit-stop frame already shows the flash */
+  flash.style.opacity=state.reduced?'.3':'.84';setTimeout(()=>flash.style.opacity='0',150);crashSound();
+  for(const ch of chunks)for(let i=0;i<ch.records.length;i++){const r=ch.records[i],wz=r.sourceZ+state.worldZ,dx=r.sourceX-plane.position.x,dz=wz;if(r.h>0&&Math.hypot(dx,dz)<CONFIG.blockPopRadius&&wz>-3&&wz<5){const len=Math.max(.1,Math.hypot(dx,dz));popped.push({chunk:ch,index:i,record:r,base:r.h,vel:2+R()*5,dx:dx/len,dz:dz/len})}}
+}
+function updateCrash(dt){
+  const dead=state.mode==='DEAD',R=Math.random;
+  state.crashElapsed+=dt;
+  if(!dead&&state.hitTimer>0){state.hitTimer-=dt;return}
+  if(!dead)state.timeScale=THREE.MathUtils.lerp(state.timeScale,1,Math.min(1,dt/CONFIG.slowMoEase));
+  const step=dt*Math.max(state.timeScale,.3);                  /* effects never freeze: slow-mo floor of 30% */
+  for(const d of debris){
+    const p=d.pivot,v=d.vel;
+    v.y-=CONFIG.crashPieceGravity*step;p.position.addScaledVector(v,step);
+    p.rotateX(d.spin.x*step);p.rotateY(d.spin.y*step);p.rotateZ(d.spin.z*step);
+    const floor=.2+d.rad;let hit=false;
+    if(p.position.y<floor){
+      p.position.y=floor;const imp=-v.y;
+      if(imp>1.4){v.y=imp*d.rest;v.x*=.72;v.z*=.72;d.spin.multiplyScalar(.7);hit=true;if(imp>2.5)crashGroundFx(p.position.x,.15,p.position.z,clampN(imp/9,0,1))}else v.y=0;
+      d.grounded=true}else d.grounded=false;
+    if(d.grounded&&!hit){                                      /* skid and settle */
+      const f=Math.exp(-3.2*step);v.x*=f;v.z*=f;d.spin.multiplyScalar(Math.exp(-2.4*step));
+      const sp=Math.hypot(v.x,v.z);
+      if(sp>2.2&&R()<step*28)for(let i=0,n=1+(R()<.5?1:0);i<n;i++)cxSpark(p.position.x,.18,p.position.z,-v.x*.2+(R()-.5)*3,1+R()*2.5,-v.z*.2+(R()-.5)*3,.08+R()*.06,.3+R()*.4);
+      if(sp>1.4&&R()<step*10)cxSmoke(p.position.x,.2,p.position.z,(R()-.5)*1.5,.4,(R()-.5)*1.5,.4,1.5,.8+R()*.5,.26,.5,.62,DUST_TINT,.4)}
+    /* smoke trail (long) and flames (short, only while it is still burning) */
+    d.t+=step;
+    const sr=d.smokeRate*Math.max(0,1-d.t/(d.fire+1.6)),fr=d.flameRate*Math.max(0,1-d.t/d.fire),q=FXQ_CRASH(),j=d.rad*2.2+.1;
+    d.accS+=sr*step*q;d.accF+=fr*step*q;
+    for(let n=0;d.accS>=1&&n<3;n++,d.accS--)cxSmoke(p.position.x+(R()-.5)*j,p.position.y+(R()-.5)*j,p.position.z+(R()-.5)*j,v.x*.12+(R()-.5)*.8,v.y*.05+.5+R()*.8,v.z*.12+(R()-.5)*.8,.35,1.3+R()*.5,.9+R()*.7,.5,.07,.25);
+    for(let n=0;d.accF>=1&&n<3;n++,d.accF--)cxFire(p.position.x+(R()-.5)*j,p.position.y+(R()-.5)*j,p.position.z+(R()-.5)*j,(R()-.5)*1.2,.6+R(),(R()-.5)*1.2,.35+R()*.2,.9+R()*.4,.2+R()*.2,.85,2,2.5)}
+  stepCrashFx(step);
+  if(popped.length){const t=state.crashElapsed,done=t>=.2,pop=done?0:Math.sin(Math.min(1,t*5)*Math.PI);for(const p of popped){p.record.h=Math.min(p.base+pop*p.vel,p.base+4);p.record.offsetX=p.dx*pop*1.15;p.record.offsetZ=p.dz*pop*1.15;setChunkInstance(p.chunk,p.record);p.chunk.boxMesh.instanceMatrix.needsUpdate=true;p.chunk.spikeMesh.instanceMatrix.needsUpdate=true}if(done)popped=[]}
+  state.shake=Math.max(0,state.shake-dt*1.6);
+  if(!dead&&state.crashElapsed>=CONFIG.crashDelay)finishCrash()}
 function finishCrash(){if(state.mode==='DEAD')return;if(state.tut){state.tut.respawn();return}state.mode='DEAD';document.querySelector('#dead h2').textContent=state.runEnded?'RUN ENDED':'CRASHED';state.runEnded=false;const final=Math.floor(state.arena?state.arenaD0:state.distance);const newBest=final>state.best;if(newBest)writeBest(final);document.getElementById('finalDistance').textContent=`${final.toLocaleString()} m`;document.getElementById('reached').textContent=state.arena?'Event Horizon':LEVELS[state.level].name;recordMap(state.arena?'void':state.level);home.classList.remove('active');hud.classList.remove('visible');dead.classList.add('active');showHomeBest();showPayout(accountCrash())}
-function clearCrash(){for(const d of debris)scene.remove(d.mesh);debris=[];for(const m of planeParts){plane.add(m);m.position.copy(m.userData.homePosition);m.quaternion.copy(m.userData.homeQuaternion);m.scale.copy(m.userData.homeScale)}for(const p of crashParticles){scene.remove(p.mesh);p.mesh.geometry.dispose();p.mesh.material.dispose()}crashParticles=[];if(smoke){scene.remove(smoke);smoke=null;smokeMat.opacity=.48}popped=[]}
+function clearCrash(){
+  for(const d of debris)scene.remove(d.pivot);debris=[];
+  for(const m of planeParts){plane.add(m);m.position.copy(m.userData.homePosition);m.quaternion.copy(m.userData.homeQuaternion);m.scale.copy(m.userData.homeScale)}
+  for(const L of [CFX.fire,CFX.smoke]){L.list.length=0;L.geo.setDrawRange(0,0)}
+  popped=[]}
 /* METEORS: diagonal falls, a ground reticle + streak that shows exactly where they land, camera shake on impact */
 const meteors=[],blasts=[],sparks=[];
 const BR=CONFIG.meteorBlastRadius;
@@ -87,12 +240,13 @@ for(const [n,a,k] of [['position',smkPosA,3],['pcol',smkColA,3],['psize',smkSize
 smkGeo.setDrawRange(0,0);
 const smkMat=new THREE.ShaderMaterial({transparent:true,depthWrite:false,uniforms:{scale:{value:700}},vertexShader:`attribute vec3 pcol;attribute float psize;attribute float palpha;uniform float scale;varying vec3 vC;varying float vA;void main(){vC=pcol;vA=palpha;vec4 mv=modelViewMatrix*vec4(position,1.);gl_PointSize=clamp(psize*scale/max(.2,-mv.z),1.,260.);gl_Position=projectionMatrix*mv;}`,fragmentShader:`varying vec3 vC;varying float vA;void main(){float d=length(gl_PointCoord-.5)*2.;if(d>1.)discard;float f=1.-d;f=f*f*(3.-2.*f);gl_FragColor=vec4(vC,f*vA);}`});
 const smkPts=new THREE.Points(smkGeo,smkMat);smkPts.frustumCulled=false;smkPts.renderOrder=9;scene.add(smkPts);
-function smkP(o){if(smk.length>=SMK_MAX)return;const p=Object.assign({x:0,y:0,zs:0,vx:0,vy:0,vz:0,life:1,s0:1,s1:3,a:.5},o);p.max=p.life;smk.push(p)}
+const smkFree=[];
+function smkP(o){if(smk.length>=SMK_MAX)return;const p=smkFree.pop()||{};p.x=0;p.y=0;p.zs=0;p.vx=0;p.vy=0;p.vz=0;p.life=1;p.s0=1;p.s1=3;p.a=.5;for(const k in o)p[k]=o[k];p.max=p.life;smk.push(p)}
 function updateMeteorSmoke(dt){
   smkMat.uniforms.scale.value=renderer.domElement.height/(2*Math.tan(camera.fov*Math.PI/360));
   let n=0;
   for(let i=0;i<smk.length;){
-    const p=smk[i];p.life-=dt;if(p.life<=0){smk[i]=smk[smk.length-1];smk.pop();continue}
+    const p=smk[i];p.life-=dt;if(p.life<=0){smkFree.push(p);smk[i]=smk[smk.length-1];smk.pop();continue}
     const dr=Math.exp(-1.3*dt);p.vx*=dr;p.vy*=dr;p.vz*=dr;p.x+=p.vx*dt;p.y+=p.vy*dt;p.zs+=p.vz*dt;
     const k=1-p.life/p.max,j=n*3,w=Math.min(1,k*3.2);
     smkPosA[j]=p.x;smkPosA[j+1]=p.y;smkPosA[j+2]=p.zs+state.worldZ;
@@ -105,12 +259,12 @@ function emitMeteorTrail(m,dt){
   const p=m.rock.position,zs=p.z-state.worldZ,d=m.dir,s=m.size;
   m.accE+=dt*60;m.accS+=dt*24;
   while(m.accE>=1){m.accE-=1;const sp=R2(3,9),o=R2(0,.9)*s,a=Math.random()*6.283,b=Math.random()*3.14,t=R2(0,2);
-    fxP({x:p.x+d.x*t+Math.cos(a)*o,y:p.y+d.y*t+Math.sin(b)*o,zs:zs+d.z*t+Math.sin(a)*o,vx:d.x*sp+R2(-1.6,1.6),vy:d.y*sp+R2(-1.6,1.6),vz:d.z*sp+R2(-1.6,1.6),g:2,drag:.9,life:R2(.35,.85),s0:R2(.45,.8)*s,s1:.06,a:1,c0:[1,.85,.45],c1:[.8,.14,.02],flick:true})}
+    fxP({x:p.x+d.x*t+Math.cos(a)*o,y:p.y+d.y*t+Math.sin(b)*o,zs:zs+d.z*t+Math.sin(a)*o,vx:d.x*sp+R2(-1.6,1.6),vy:d.y*sp+R2(-1.6,1.6),vz:d.z*sp+R2(-1.6,1.6),g:2,drag:.9,life:R2(.35,.85),s0:R2(.45,.8)*s,s1:.06,a:1,c0:FXC[0],c1:FXC[1],flick:true})}
   while(m.accS>=1){m.accS-=1;const back=R2(1.5,7)*s;
     smkP({x:p.x+d.x*back+R2(-.5,.5),y:p.y+d.y*back+R2(-.5,.5),zs:zs+d.z*back+R2(-.5,.5),vx:R2(-.8,.8),vy:R2(.2,1.6),vz:R2(-.8,.8),life:R2(1.1,1.8),s0:R2(1.3,2)*s,s1:R2(5,8)*s,a:R2(.38,.55)})}
 }
 const UP=new THREE.Vector3(0,1,0);
-const overlayMat=(color,opacity)=>new THREE.MeshBasicMaterial({color,transparent:true,opacity,depthTest:false,depthWrite:false,fog:false,side:THREE.DoubleSide});
+const overlayMat=(color,opacity)=>matGet('ov',color,opacity);
 
 
 
@@ -150,24 +304,24 @@ function spawnMeteor(sp){
   const ringMat=overlayMat('#ff5a3a',.9),fillMat=overlayMat('#ff8a4a',.14),progMat=overlayMat('#ff7a3a',.3);
   const ring=new THREE.Mesh(reticleRingGeo,ringMat),fill=new THREE.Mesh(reticleFillGeo,fillMat),prog=new THREE.Mesh(reticleFillGeo,progMat),retic=new THREE.Group();
   for(const mm of [ring,fill,prog]){mm.rotation.x=-Math.PI/2;mm.renderOrder=9;retic.add(mm)}prog.scale.setScalar(.001);
-  const lineGeo=new THREE.BufferGeometry();lineGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(6),3));
-  const lineMat=new THREE.LineBasicMaterial({color:'#ffa070',transparent:true,opacity:.2,depthTest:false,depthWrite:false,fog:false}),line=new THREE.Line(lineGeo,lineMat);line.frustumCulled=false;line.renderOrder=9;
+  const lineGeo=lineGeoGet();
+  const lineMat=matGet('ln','#ffa070',.2),line=new THREE.Line(lineGeo,lineMat);line.frustumCulled=false;line.renderOrder=9;
   scene.add(rock,trail,core,glow,retic,line);
   if(state.mode==='PLAYING')meteorFallSound(T,x);meteors.push({x,zs,T,t:0,start,dir,size,seed:rnd()*6.28,spin:new THREE.Vector3(1.5+rnd()*2.5,1+rnd()*2.5,rnd()*2-1),accE:0,accS:0,rock,trail,core,glow,retic,prog,ringMat,fillMat,progMat,line,lineGeo,lineMat});return true
 }
-function removeMeteor(i){const m=meteors[i];scene.remove(m.rock,m.trail,m.core,m.glow,m.retic,m.line);m.ringMat.dispose();m.fillMat.dispose();m.progMat.dispose();m.lineMat.dispose();m.lineGeo.dispose();meteors.splice(i,1)}
+function removeMeteor(i){const m=meteors[i];scene.remove(m.rock,m.trail,m.core,m.glow,m.retic,m.line);matPut(m.ringMat);matPut(m.fillMat);matPut(m.progMat);matPut(m.lineMat);lineGeoPut(m.lineGeo);meteors.splice(i,1)}
 function impactMeteor(m){
   const zr=m.zs+state.worldZ,dist=Math.hypot(m.x-plane.position.x,zr);
-  const fire=new THREE.Mesh(blastGeo,new THREE.MeshBasicMaterial({color:'#ffb04a',transparent:true,opacity:.9,blending:THREE.AdditiveBlending,depthWrite:false,fog:false}));
+  const fire=new THREE.Mesh(blastGeo,matGet('addF','#ffb04a',.9));
   const shock=new THREE.Mesh(reticleRingGeo,overlayMat('#ffd9a0',.9));shock.rotation.x=-Math.PI/2;shock.renderOrder=9;
   scene.add(fire,shock);blasts.push({x:m.x,zs:m.zs,age:0,life:.55,fire,shock});
   for(let i=0;i<16;i++){
-    const mesh=new THREE.Mesh(debrisGeo,new THREE.MeshBasicMaterial({color:i%3?'#ffb04a':'#ff6a3a',fog:false})),a=Math.random()*Math.PI*2,sp=3+Math.random()*7;
+    const mesh=new THREE.Mesh(debrisGeo,sparkMat(i%3?'#ffb04a':'#ff6a3a')),a=Math.random()*Math.PI*2,sp=3+Math.random()*7;
     scene.add(mesh);sparks.push({mesh,ax:m.x,az:m.zs,o:new THREE.Vector3(0,.8,0),vel:new THREE.Vector3(Math.cos(a)*sp,4+Math.random()*7,Math.sin(a)*sp),life:.7+Math.random()*.5})
   }
   {const ix=m.x,iz=m.zs;
-    fxP({x:ix,y:1.4,zs:iz,life:.3,s0:7,s1:15,a:.9,c0:[1,.92,.65],c1:[1,.45,.1]});
-    for(let i=0;i<28;i++){const a=Math.random()*6.283,sp=R2(5,17);fxP({x:ix,y:.9,zs:iz,vx:Math.cos(a)*sp,vy:R2(4,13),vz:Math.sin(a)*sp,g:20,drag:.35,life:R2(.5,1.2),s0:R2(.5,.9),s1:.08,a:1,c0:[1,.85,.4],c1:[.85,.15,.02],land:true,flick:true})}
+    fxP({x:ix,y:1.4,zs:iz,life:.3,s0:7,s1:15,a:.9,c0:FXC[2],c1:FXC[3]});
+    for(let i=0;i<28;i++){const a=Math.random()*6.283,sp=R2(5,17);fxP({x:ix,y:.9,zs:iz,vx:Math.cos(a)*sp,vy:R2(4,13),vz:Math.sin(a)*sp,g:20,drag:.35,life:R2(.5,1.2),s0:R2(.5,.9),s1:.08,a:1,c0:FXC[4],c1:FXC[5],land:true,flick:true})}
     for(let i=0;i<16;i++){const a=Math.random()*6.283,sp=R2(2,7);smkP({x:ix+Math.cos(a)*1.5,y:.8,zs:iz+Math.sin(a)*1.5,vx:Math.cos(a)*sp,vy:R2(1.5,5),vz:Math.sin(a)*sp,life:R2(1.4,2.3),s0:R2(2.5,4),s1:R2(8,13),a:R2(.45,.65)})}}
   state.rumble=Math.max(state.rumble,.14+.6*Math.max(0,1-dist/70));
   thudSound(Math.max(0,1-dist/90),clampN((m.x-plane.position.x)/25,-.8,.8));
@@ -191,12 +345,12 @@ function updateMeteors(dt,canKill){updateHazards(dt,canKill);
     b.fire.position.set(b.x,1.2+k*1.6,zr);b.fire.scale.setScalar(lerpN(.7,BR*.85,out));b.fire.material.opacity=.9*Math.pow(1-k,1.5);
     b.shock.position.set(b.x,.55,zr);b.shock.scale.setScalar(lerpN(1,1.9,out));b.shock.material.opacity=.9*(1-k);
     if(canKill&&state.mode==='PLAYING'&&state.shieldTimer<=0&&state.shieldSafety<=0&&b.age<.42&&Math.hypot(b.x-plane.position.x,zr)<BR)burstCrash();
-    if(k>=1){scene.remove(b.fire,b.shock);b.fire.material.dispose();b.shock.material.dispose();blasts.splice(i,1)}
+    if(k>=1){scene.remove(b.fire,b.shock);matPut(b.fire.material);matPut(b.shock.material);blasts.splice(i,1)}
   }
   for(let i=sparks.length-1;i>=0;i--){
     const s=sparks[i];s.life-=dt;s.vel.y-=16*dt;s.o.addScaledVector(s.vel,dt);if(s.o.y<.2){s.o.y=.2;s.vel.y*=-.3;s.vel.x*=.6;s.vel.z*=.6}
     s.mesh.position.set(s.ax+s.o.x,s.o.y,s.az+state.worldZ+s.o.z);s.mesh.rotation.x+=dt*6;s.mesh.rotation.y+=dt*5;
-    if(s.life<=0){scene.remove(s.mesh);s.mesh.material.dispose();sparks.splice(i,1)}
+    if(s.life<=0){scene.remove(s.mesh);sparks.splice(i,1)}
   }
 }
 function updateMeteorSpawns(dt){
@@ -207,9 +361,9 @@ function updateMeteorSpawns(dt){
   state.meteorTimer=spawnMeteor()?mean*(.65+Math.random()*.7):.4   /* skipped (no safe spot): try again shortly */
 }
 function clearMeteors(){clearHazards();
-  while(meteors.length)removeMeteor(meteors.length-1);smk.length=0;smkGeo.setDrawRange(0,0);
-  for(const b of blasts){scene.remove(b.fire,b.shock);b.fire.material.dispose();b.shock.material.dispose()}blasts.length=0;
-  for(const s of sparks){scene.remove(s.mesh);s.mesh.material.dispose()}sparks.length=0
+  while(meteors.length)removeMeteor(meteors.length-1);while(smk.length)smkFree.push(smk.pop());smkGeo.setDrawRange(0,0);
+  for(const b of blasts){scene.remove(b.fire,b.shock);matPut(b.fire.material);matPut(b.shock.material)}blasts.length=0;
+  for(const s of sparks)scene.remove(s.mesh);sparks.length=0
 }
 /* ===== PER-MAP HAZARDS =====
    lightning (Thunderstorm), crosswind gusts (Dune Sea, Solar Flare), lava geysers (Magma Fields), gravity wells (Eclipse).
@@ -227,7 +381,7 @@ gustGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(GUST_
 const gustLines=new THREE.LineSegments(gustGeo,gustMat);gustLines.frustumCulled=false;gustLines.visible=false;scene.add(gustLines);
 const gustSeed=Array.from({length:GUST_N},()=>({y:.6+Math.random()*13,z:-Math.random()*70,o:Math.random(),len:3+Math.random()*5}));
 function resetHazardTimers(level){const R=LEVEL_RULES[level];state.lightT=R.lightning?R.lightning.every[0]*1.1:9;state.geyserT=R.geyser?R.geyser.every[0]*.9:9;state.wellT=R.well?4:9;state.gustT=R.gust?R.gust.every[0]*.7:9;state.skyT=3+Math.random()*3;state.beamT=R.beam?R.beam.every[0]:9}
-function emitSparks(x,zs,n,c1,c2,sp,up){for(let i=0;i<n;i++){const mesh=new THREE.Mesh(debrisGeo,new THREE.MeshBasicMaterial({color:i%3?c1:c2,fog:false})),a=Math.random()*Math.PI*2,sv=sp*(.4+Math.random());scene.add(mesh);sparks.push({mesh,ax:x,az:zs,o:new THREE.Vector3(0,.8,0),vel:new THREE.Vector3(Math.cos(a)*sv,up*(.5+Math.random()),Math.sin(a)*sv),life:.7+Math.random()*.5})}}
+function emitSparks(x,zs,n,c1,c2,sp,up){for(let i=0;i<n;i++){const mesh=new THREE.Mesh(debrisGeo,sparkMat(i%3?c1:c2)),a=Math.random()*Math.PI*2,sv=sp*(.4+Math.random());scene.add(mesh);sparks.push({mesh,ax:x,az:zs,o:new THREE.Vector3(0,.8,0),vel:new THREE.Vector3(Math.cos(a)*sv,up*(.5+Math.random()),Math.sin(a)*sv),life:.7+Math.random()*.5})}}
 
 /* a spot on open ground about where the plane will be in T seconds, shifted sideways by offMin..offMax so it must be dodged, never an instant trap */
 function pickStrikeSpot(T,offMin,offMax,clear){
@@ -242,13 +396,11 @@ function spawnLightning(sp,lite){
   const p=sp||pickStrikeSpot(.95,1.8,5.2,3);if(!p)return false;
   const ringMat=overlayMat('#ffe36a',.9),fillMat=overlayMat('#fff4a8',.12),ring=new THREE.Mesh(strikeRingGeo,ringMat),fill=new THREE.Mesh(strikeFillGeo,fillMat),retic=new THREE.Group();
   for(const m of [ring,fill]){m.rotation.x=-Math.PI/2;m.renderOrder=9;retic.add(m)}
-  const top=(Math.random()-.5)*14,pts=[];
-  for(let i=0;i<=14;i++){const q=i/14,jit=(i>0&&i<14)?5.5*(1-q*.4):0;pts.push(new THREE.Vector3(top*(1-q)+(Math.random()-.5)*jit,48*(1-q),(Math.random()-.5)*jit*.6))}
-  const curve=new THREE.CatmullRomCurve3(pts),coreGeo=new THREE.TubeGeometry(curve,lite?16:42,.2,5,false),haloGeo=new THREE.TubeGeometry(curve,lite?16:42,.75,6,false);
-  const coreMat=new THREE.MeshBasicMaterial({color:'#f7fbff',transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,fog:false}),haloMat=new THREE.MeshBasicMaterial({color:'#8fb4ff',transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false,fog:false});
+  const bk=bankGet('bolt'+(lite?1:0),8,()=>makeBoltGeo(lite)),coreGeo=bk.core,haloGeo=bk.halo;
+  const coreMat=matGet('addF','#f7fbff',0),haloMat=matGet('addF','#8fb4ff',0);
   const core=new THREE.Mesh(coreGeo,coreMat),halo=new THREE.Mesh(haloGeo,haloMat);core.visible=halo.visible=false;core.frustumCulled=halo.frustumCulled=false;
-  const beamGeo=new THREE.BufferGeometry();beamGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array([0,.5,0,0,48,0]),3));
-  const beamMat=new THREE.LineBasicMaterial({color:'#fff0a0',transparent:true,opacity:.1,depthTest:false,depthWrite:false,fog:false}),beam=new THREE.Line(beamGeo,beamMat);beam.frustumCulled=false;beam.renderOrder=9;
+  const beamGeo=BOLT_BEAM_GEO;
+  const beamMat=matGet('ln','#fff0a0',.1),beam=new THREE.Line(beamGeo,beamMat);beam.frustumCulled=false;beam.renderOrder=9;
   scene.add(retic,core,halo,beam);
   if(!p.quiet&&state.mode==='PLAYING')staticSound(p.T||.95);bolts.push({x:p.x,zs:p.zs,t:0,T:p.T||.95,quiet:!!p.quiet,age:0,struck:false,retic,ringMat,fillMat,core,halo,coreMat,haloMat,coreGeo,haloGeo,beam,beamGeo,beamMat});return true
 }
@@ -260,7 +412,7 @@ function strikeBolt(b){
   if(dist<30){flash.style.opacity=String(.05+.2*(1-dist/30));setTimeout(()=>flash.style.opacity='0',90)}
   emitSparks(b.x,b.zs,10,'#fff2a0','#9ac0ff',5,6)}
 }
-function removeBolt(i){const b=bolts[i];scene.remove(b.retic,b.core,b.halo,b.beam);b.ringMat.dispose();b.fillMat.dispose();b.coreMat.dispose();b.haloMat.dispose();b.beamMat.dispose();b.coreGeo.dispose();b.haloGeo.dispose();b.beamGeo.dispose();bolts.splice(i,1)}
+function removeBolt(i){const b=bolts[i];scene.remove(b.retic,b.core,b.halo,b.beam);matPut(b.ringMat);matPut(b.fillMat);matPut(b.coreMat);matPut(b.haloMat);matPut(b.beamMat);bolts.splice(i,1)}
 function updateBolts(dt,canKill){
   for(let i=bolts.length-1;i>=0;i--){
     const b=bolts[i];b.t+=dt;const zr=b.zs+state.worldZ;
@@ -285,7 +437,8 @@ fxGeo.setDrawRange(0,0);
 const fxMat=new THREE.ShaderMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,uniforms:{scale:{value:700}},vertexShader:`attribute vec3 pcol;attribute float psize;attribute float palpha;uniform float scale;varying vec3 vC;varying float vA;void main(){vC=pcol;vA=palpha;vec4 mv=modelViewMatrix*vec4(position,1.);gl_PointSize=clamp(psize*scale/max(.2,-mv.z),1.,240.);gl_Position=projectionMatrix*mv;}`,fragmentShader:`varying vec3 vC;varying float vA;void main(){float d=length(gl_PointCoord-.5)*2.;if(d>1.)discard;float f=1.-d;gl_FragColor=vec4(vC*(.55+f*f*.9),f*vA);}`});
 const fxPts=new THREE.Points(fxGeo,fxMat);fxPts.frustumCulled=false;fxPts.renderOrder=10;scene.add(fxPts);
 const FX_HOT=[1,.7,.25],FX_RED=[.75,.1,.02],rnd=Math.random,R2=(a,b)=>a+(b-a)*Math.random();
-function fxP(o){if(fx.length>=FX_MAX)return;const p=Object.assign({x:0,y:0,zs:0,vx:0,vy:0,vz:0,g:0,drag:0,life:1,s0:.3,s1:.2,a:1,c0:FX_HOT,c1:FX_RED,ph:rnd()*6.28,land:false,kind:0},o);p.max=p.life;fx.push(p)}
+const fxFree=[];
+function fxP(o){if(fx.length>=((FX_MAX*FXQ.cap)|0))return;const p=fxFree.pop()||{};p.x=0;p.y=0;p.zs=0;p.vx=0;p.vy=0;p.vz=0;p.g=0;p.drag=0;p.life=1;p.s0=.3;p.s1=.2;p.a=1;p.c0=FX_HOT;p.c1=FX_RED;p.ph=rnd()*6.28;p.land=false;p.kind=0;p.flick=false;p.cx=0;p.cy=0;p.cz=0;p.ang=0;p.r=0;p.av=0;p.vr=0;for(const k in o)p[k]=o[k];p.max=p.life;fx.push(p)}
 /* WELL_TILT / WELL_ROLL: the accretion disc is a ring tilted toward the camera; infalling matter uses the same maths so it hugs the disc */
 const WELL_TILT=-1,WELL_ROLL=.28;
 function updateFx(dt){
@@ -294,7 +447,7 @@ function updateFx(dt){
   for(let i=0;i<fx.length;){
     const p=fx[i];p.life-=dt;
     if(p.kind===1)p.r-=p.vr*dt*(1+(6.6-p.r)*.16);
-    if(p.life<=0||(p.kind===1&&p.r<1.45)){fx[i]=fx[fx.length-1];fx.pop();continue}
+    if(p.life<=0||(p.kind===1&&p.r<1.45)){fxFree.push(p);fx[i]=fx[fx.length-1];fx.pop();continue}
     let k,fade;
     if(p.kind===1){
       p.ang+=p.av*dt*(6/Math.max(1.3,p.r));
@@ -314,7 +467,7 @@ function updateFx(dt){
   }
   fxGeo.setDrawRange(0,n);fxGeo.attributes.position.needsUpdate=fxGeo.attributes.pcol.needsUpdate=fxGeo.attributes.psize.needsUpdate=fxGeo.attributes.palpha.needsUpdate=true;fxPts.visible=n>0
 }
-function clearFx(){fx.length=0;fxGeo.setDrawRange(0,0);fxPts.visible=false}
+function clearFx(){while(fx.length)fxFree.push(fx.pop());fxGeo.setDrawRange(0,0);fxPts.visible=false}
 /* ---- lava geysers (Magma Fields): glowing cracks open in the ground and brighten, then a column of flame and lava erupts, throwing lava blobs, flame sparks and drips ---- */
 const flameGeo=new THREE.CylinderGeometry(.35,1.5,1,22,10,true);flameGeo.translate(0,.5,0);
 const crackFrag=`uniform float glow;uniform float time;uniform float ph;varying float vT;varying float vC;void main(){float e=1.-abs(vC);float flick=.62+.38*sin(ph+vT*5.);vec3 deep=vec3(.5,.07,.02),hot=vec3(1.,.62,.16),white=vec3(1.,.93,.65);vec3 c=mix(deep,hot,clamp(glow*1.2*e+.1,0.,1.));c=mix(c,white,smoothstep(.55,1.,glow)*e*e);float a=(.7+.3*min(glow,1.))*smoothstep(0.,.7,e)*(1.-vT*.25)*flick;gl_FragColor=vec4(c*(1.1+glow*1.5),a);}`;
@@ -348,20 +501,20 @@ function buildCrackGeo(){
 const GEYSER_WARN=2.7;   /* seconds of warning (was 1.4): cracks now appear ~2x farther out */
 function spawnGeyser(sp){
   const p=sp||pickStrikeSpot(GEYSER_WARN,1.6,5,2.6);if(!p)return false;
-  const crackGeo=buildCrackGeo(),crackMat=new THREE.ShaderMaterial({transparent:true,depthTest:false,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,uniforms:{glow:{value:0},time:{value:0},ph:{value:0}},vertexShader:crackVert,fragmentShader:crackFrag}),cracks=new THREE.Mesh(crackGeo,crackMat);
-  const haloMat=new THREE.ShaderMaterial({transparent:true,depthTest:false,depthWrite:false,blending:THREE.AdditiveBlending,uniforms:{glow:{value:0}},vertexShader:haloVert,fragmentShader:haloFrag}),halo=new THREE.Mesh(haloGeo,haloMat);halo.rotation.x=-Math.PI/2;
+  const crackGeo=bankGet('crack',8,buildCrackGeo),crackMat=geyserCrackMat(),cracks=new THREE.Mesh(crackGeo,crackMat);cracks.rotation.y=rnd()*6.283;
+  const haloMat=geyserHaloMat(),halo=new THREE.Mesh(haloGeo,haloMat);halo.rotation.x=-Math.PI/2;
   cracks.renderOrder=9;halo.renderOrder=8;cracks.frustumCulled=halo.frustumCulled=false;
   const group=new THREE.Group();group.add(halo,cracks);group.scale.setScalar(1.35);
-  const mk=core=>new THREE.ShaderMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,fog:false,uniforms:{time:{value:0},seed:{value:rnd()*20},alpha:{value:0},core:{value:core}},vertexShader:flameVert,fragmentShader:flameFrag});
+  const mk=geyserFlameMat;
   const colMat=mk(0),coreMat=mk(1),col=new THREE.Group(),outer=new THREE.Mesh(flameGeo,colMat),inner=new THREE.Mesh(flameGeo,coreMat);
   inner.scale.set(.55,.8,.55);col.add(outer,inner);col.visible=false;outer.frustumCulled=inner.frustumCulled=false;
   scene.add(group,col);geysers.push({x:p.x,zs:p.zs,t:0,T:p.T||GEYSER_WARN,quiet:!!p.quiet,e:-1,acc:0,ph:0,group,crackGeo,crackMat,haloMat,col,colMat,coreMat,inner});return true
 }
-function removeGeyser(i){const g=geysers[i];scene.remove(g.group,g.col);g.crackGeo.dispose();g.crackMat.dispose();g.haloMat.dispose();g.colMat.dispose();g.coreMat.dispose();geysers.splice(i,1)}
-function fxLava(g,sp,v0,v1,y0){const a=rnd()*6.283,s=sp*Math.sqrt(rnd());fxP({x:g.x+Math.cos(a)*.5,y:y0,zs:g.zs+Math.sin(a)*.5,vx:Math.cos(a)*s,vz:Math.sin(a)*s,vy:R2(v0,v1),g:22,drag:.12,life:R2(1.1,1.8),s0:R2(.5,.9),s1:.32,a:.95,c0:[1,.72,.26],c1:FX_RED,land:true})}
-function fxSpark(g){const a=rnd()*6.283,s=R2(1.5,9);fxP({x:g.x,y:R2(.4,2),zs:g.zs,vx:Math.cos(a)*s,vz:Math.sin(a)*s,vy:R2(8,26),g:14,drag:.22,life:R2(.5,1.4),s0:.2,s1:.05,a:1,c0:[1,.96,.62],c1:[1,.35,.06],flick:true})}
-function fxPuff(g,h){fxP({x:g.x+R2(-.9,.9),y:R2(.3,Math.max(.5,h*.35)),zs:g.zs+R2(-.9,.9),vx:R2(-1.2,1.2),vz:R2(-1.2,1.2),vy:R2(5,11),g:-2,drag:.6,life:R2(.5,.9),s0:R2(1,1.6),s1:R2(2.2,3.3),a:.36,c0:[1,.62,.2],c1:[.5,.06,.02]})}
-function fxDrip(g,h){const a=rnd()*6.283,r=R2(.5,1.3);fxP({x:g.x+Math.cos(a)*r,y:R2(1,Math.max(1.5,h*.8)),zs:g.zs+Math.sin(a)*r,vx:Math.cos(a)*R2(.1,.9),vz:Math.sin(a)*R2(.1,.9),vy:R2(-1,1),g:16,drag:.05,life:R2(.8,1.4),s0:.28,s1:.2,a:.95,c0:[1,.6,.15],c1:[.7,.1,.02],land:true})}
+function removeGeyser(i){const g=geysers[i];scene.remove(g.group,g.col);matPut(g.crackMat);matPut(g.haloMat);matPut(g.colMat);matPut(g.coreMat);geysers.splice(i,1)}
+function fxLava(g,sp,v0,v1,y0){const a=rnd()*6.283,s=sp*Math.sqrt(rnd());fxP({x:g.x+Math.cos(a)*.5,y:y0,zs:g.zs+Math.sin(a)*.5,vx:Math.cos(a)*s,vz:Math.sin(a)*s,vy:R2(v0,v1),g:22,drag:.12,life:R2(1.1,1.8),s0:R2(.5,.9),s1:.32,a:.95,c0:FXC[6],c1:FX_RED,land:true})}
+function fxSpark(g){const a=rnd()*6.283,s=R2(1.5,9);fxP({x:g.x,y:R2(.4,2),zs:g.zs,vx:Math.cos(a)*s,vz:Math.sin(a)*s,vy:R2(8,26),g:14,drag:.22,life:R2(.5,1.4),s0:.2,s1:.05,a:1,c0:FXC[7],c1:FXC[8],flick:true})}
+function fxPuff(g,h){fxP({x:g.x+R2(-.9,.9),y:R2(.3,Math.max(.5,h*.35)),zs:g.zs+R2(-.9,.9),vx:R2(-1.2,1.2),vz:R2(-1.2,1.2),vy:R2(5,11),g:-2,drag:.6,life:R2(.5,.9),s0:R2(1,1.6),s1:R2(2.2,3.3),a:.36,c0:FXC[9],c1:FXC[10]})}
+function fxDrip(g,h){const a=rnd()*6.283,r=R2(.5,1.3);fxP({x:g.x+Math.cos(a)*r,y:R2(1,Math.max(1.5,h*.8)),zs:g.zs+Math.sin(a)*r,vx:Math.cos(a)*R2(.1,.9),vz:Math.sin(a)*R2(.1,.9),vy:R2(-1,1),g:16,drag:.05,life:R2(.8,1.4),s0:.28,s1:.2,a:.95,c0:FXC[11],c1:FXC[12],land:true})}
 function updateGeysers(dt,canKill){
   for(let i=geysers.length-1;i>=0;i--){
     const g=geysers[i];g.t+=dt;const zr=g.zs+state.worldZ,q=g.quiet?.55:1;
@@ -370,7 +523,7 @@ function updateGeysers(dt,canKill){
     if(g.t<g.T){
       const k=g.t/g.T,gl=(.85+.65*Math.pow(k,1.4))*Math.min(1,g.t*10);
       g.crackMat.uniforms.glow.value=gl;g.haloMat.uniforms.glow.value=gl;
-      if(k>.45){g.acc+=dt*(k-.45)*70*q;while(g.acc>=1){g.acc--;const a=rnd()*6.283,r=R2(.2,2);fxP({x:g.x+Math.cos(a)*r,y:.6,zs:g.zs+Math.sin(a)*r,vx:R2(-.6,.6),vz:R2(-.6,.6),vy:R2(1.5,4),g:5,drag:.3,life:R2(.5,.9),s0:.13,s1:.04,a:.9,c0:[1,.8,.4],c1:[1,.3,.05],flick:true})}}
+      if(k>.45){g.acc+=dt*(k-.45)*70*q;while(g.acc>=1){g.acc--;const a=rnd()*6.283,r=R2(.2,2);fxP({x:g.x+Math.cos(a)*r,y:.6,zs:g.zs+Math.sin(a)*r,vx:R2(-.6,.6),vz:R2(-.6,.6),vy:R2(1.5,4),g:5,drag:.3,life:R2(.5,.9),s0:.13,s1:.04,a:.9,c0:FXC[13],c1:FXC[14],flick:true})}}
     }else{
       if(g.e<0){
         g.e=0;const dist=Math.hypot(g.x-plane.position.x,zr);state.rumble=Math.max(state.rumble,.1+.3*Math.max(0,1-dist/60));
@@ -402,23 +555,24 @@ const wellGlowFrag=`uniform float alpha;varying vec2 vUv;void main(){float r=len
 const wellDarkFrag=`uniform float alpha;varying vec2 vUv;void main(){float r=length(vUv-.5)*2.;if(r>1.)discard;gl_FragColor=vec4(.02,0.,.05,pow(1.-r,1.5)*.6*alpha);}`;
 const wellVert=`varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`;
 const wellCoreGeo=new THREE.SphereGeometry(1.35,24,16),wellDiscGeo=new THREE.RingGeometry(1.75,6.4,96,1),wellRingGeo=new THREE.RingGeometry(1.38,1.78,72),wellGlowGeo=new THREE.CircleGeometry(12,48),wellDarkGeo=new THREE.CircleGeometry(4.4,40);
-const wellMat=(frag,blend,test)=>new THREE.ShaderMaterial({transparent:true,depthWrite:false,depthTest:test,blending:blend,side:THREE.DoubleSide,uniforms:{time:{value:0},alpha:{value:0}},vertexShader:wellVert,fragmentShader:frag});
+const wellMatRaw=(frag,blend,test)=>new THREE.ShaderMaterial({transparent:true,depthWrite:false,depthTest:test,blending:blend,side:THREE.DoubleSide,uniforms:{time:{value:0},alpha:{value:0}},vertexShader:wellVert,fragmentShader:frag});
+const wellMat=(frag,blend,test,key)=>shGet(key,()=>wellMatRaw(frag,blend,test));
 function spawnWell(dpO,sideO){
   for(let a=0;a<6;a++){
     const Dp=state.distance+(dpO||95+Math.random()*25),x=state.x+(sideO||(Math.random()<.5?-1:1))*(7+Math.random()*(state.arena?20:9));
     if(!freeBox(x-6,x+6,Dp-30,Dp+30))continue;
     const group=new THREE.Group(),mats=[],add=(geo,mat,order)=>{const m=new THREE.Mesh(geo,mat);m.renderOrder=order;m.frustumCulled=false;group.add(m);mats.push(mat);return m};
-    const dark=add(wellDarkGeo,wellMat(wellDarkFrag,THREE.NormalBlending,true),3),glow=add(wellGlowGeo,wellMat(wellGlowFrag,THREE.AdditiveBlending,true),4);
-    const coreMat=new THREE.MeshBasicMaterial({color:'#07000f',transparent:true,opacity:0,fog:false});mats.push(coreMat);
+    const dark=add(wellDarkGeo,wellMat(wellDarkFrag,THREE.NormalBlending,true,'wd'),3),glow=add(wellGlowGeo,wellMat(wellGlowFrag,THREE.AdditiveBlending,true,'wg'),4);
+    const coreMat=matGet('wcore','#07000f',0);mats.push(coreMat);
     const core=new THREE.Mesh(wellCoreGeo,coreMat);core.renderOrder=5;core.frustumCulled=false;group.add(core);
     const pivot=new THREE.Group();pivot.rotation.z=WELL_ROLL;group.add(pivot);
-    const discMat=wellMat(wellDiscFrag,THREE.AdditiveBlending,true),disc=new THREE.Mesh(wellDiscGeo,discMat);disc.rotation.x=WELL_TILT;disc.renderOrder=6;disc.frustumCulled=false;pivot.add(disc);mats.push(discMat);
-    const ring=add(wellRingGeo,wellMat(wellRingFrag,THREE.AdditiveBlending,true),7);
+    const discMat=wellMat(wellDiscFrag,THREE.AdditiveBlending,true,'wdisc'),disc=new THREE.Mesh(wellDiscGeo,discMat);disc.rotation.x=WELL_TILT;disc.renderOrder=6;disc.frustumCulled=false;pivot.add(disc);mats.push(discMat);
+    const ring=add(wellRingGeo,wellMat(wellRingFrag,THREE.AdditiveBlending,true,'wr'),7);
     scene.add(group);wells.push({x,y:WELL_Y,zs:-Dp,t:0,acc:0,group,mats,coreMat,discMat,billboards:[dark,glow,ring]});return true
   }
   return false
 }
-function removeWell(i){const w=wells[i];scene.remove(w.group);for(const m of w.mats)m.dispose();wells.splice(i,1)}
+function removeWell(i){const w=wells[i];scene.remove(w.group);for(const m of w.mats)matPut(m);wells.splice(i,1)}
 function updateWells(dt,canKill){
   let ext=0,strain=0,warp=0,best=null;
   for(let i=wells.length-1;i>=0;i--){
@@ -427,7 +581,7 @@ function updateWells(dt,canKill){
     const al=Math.min(1,w.t*1.2)*clampN((zr+125)/30,0,1)*(1-clampN((zr-4)/8,0,1));
     for(const m of w.mats){if(m.uniforms){m.uniforms.alpha.value=al;if(m.uniforms.time)m.uniforms.time.value=state.clock}}
     w.coreMat.opacity=al;for(const b of w.billboards)b.quaternion.copy(camera.quaternion);
-    if(al>.25){w.acc+=dt*38*al;while(w.acc>=1){w.acc--;fxP({kind:1,cx:w.x,cy:w.y,cz:w.zs,ang:rnd()*6.283,r:R2(3.2,6.4),av:R2(2.2,3.4),vr:R2(1.1,2.1),life:6,s0:.3,s1:.1,a:.9,c0:[.55,.15,1],c1:[1,.85,1]})}}
+    if(al>.25){w.acc+=dt*38*al;while(w.acc>=1){w.acc--;fxP({kind:1,cx:w.x,cy:w.y,cz:w.zs,ang:rnd()*6.283,r:R2(3.2,6.4),av:R2(2.2,3.4),vr:R2(1.1,2.1),life:6,s0:.3,s1:.1,a:.9,c0:FXC[15],c1:FXC[16]})}}
     if(canKill){
       const dx=w.x-plane.position.x,dy=w.y-plane.position.y,d=Math.hypot(dx,dy,zr);
       ext+=WELL_FORCE*Math.pow(clampN(1-d/WELL_PULL,0,1),1.25)*clampN(dx/2.5,-1,1);
@@ -474,7 +628,7 @@ function skyFlashTick(dt){
    ahead of the plane and stays lethal for BM_ACT s. Big shake + flash + shockwave. Never aimed at the plane's exact line: it must be dodged. ---- */
 const beams=[],BM_R=3.1,BL_HALF=7,BL_KILL=1.9,BM_LEAD=.5,BM_ACT=1.15;
 const bmCylGeo=new THREE.CylinderGeometry(1,1,70,24,1,true),bmBladeGeo=new THREE.BoxGeometry(1,70,1),bmBarGeo=new THREE.BoxGeometry(1,.05,1),bmShockGeo=new THREE.RingGeometry(.86,1,48);
-const bmMat=(c,o)=>new THREE.MeshBasicMaterial({color:c,transparent:true,opacity:o,blending:THREE.AdditiveBlending,depthWrite:false,fog:false,side:THREE.DoubleSide});
+const bmMat=(c,o)=>matGet('addD',c,o);
 function spawnBeam(){
   const blade=Math.random()<.4,T=blade?1.9:1.5,sp=Math.max(state.speed,CONFIG.baseSpeed),Dp=state.distance+sp*(T+BM_LEAD)+(Math.random()-.5)*6;
   const base=state.x+clampN(state.vx*T*.5,-6,6),side=Math.random()<.5?-1:1,x=base+side*(blade?Math.random()*3.5:1.6+Math.random()*4.4);
@@ -494,7 +648,7 @@ function spawnBeam(){
   halo.visible=core.visible=false;halo.frustumCulled=core.frustumCulled=false;scene.add(retic,halo,core,shock);
   if(state.mode==='PLAYING')beamChargeSound(T);beams.push({blade,x,zs:-Dp,t:0,T,age:0,struck:false,rot:Math.random()*Math.PI,w:(Math.random()<.5?-1:1)*(.35+Math.random()*.25),retic,halo,core,shock,shockMat,rM,fM,bar,mats});return true
 }
-function removeBeam(i){const b=beams[i];scene.remove(b.retic,b.halo,b.core,b.shock);for(const m of b.mats)m.dispose();beams.splice(i,1)}
+function removeBeam(i){const b=beams[i];scene.remove(b.retic,b.halo,b.core,b.shock);for(const m of b.mats)matPut(m);beams.splice(i,1)}
 function strikeBeam(b){
   b.struck=true;b.age=0;b.halo.visible=b.core.visible=b.shock.visible=true;
   const zr=b.zs+state.worldZ,dist=Math.hypot(b.x-plane.position.x,zr),near=Math.max(0,1-dist/80),th=b.rot+b.w*b.t,R=state.reduced;
@@ -546,4 +700,37 @@ function clearHazards(){
   if(state.arn)state.arn.q.length=0;
   while(bolts.length)removeBolt(bolts.length-1);while(geysers.length)removeGeyser(geysers.length-1);while(wells.length)removeWell(wells.length-1);while(beams.length)removeBeam(beams.length-1);clearFx();state.wellStrain=0;state.wellWarp=0;state.wellRef=null;
   state.skyFlash=0;state.extForce=0;state.gustPhase='idle';state.gustEnv=0;state.gustRoll=0;state.flashPulses=0;gustLines.visible=false
+}
+
+/* ---- pooled geyser shader materials (uniforms are reset by shGet) ---- */
+function geyserCrackMat(){return shGet('gcrack',()=>new THREE.ShaderMaterial({transparent:true,depthTest:false,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,uniforms:{glow:{value:0},time:{value:0},ph:{value:0}},vertexShader:crackVert,fragmentShader:crackFrag}))}
+function geyserHaloMat(){return shGet('ghalo',()=>new THREE.ShaderMaterial({transparent:true,depthTest:false,depthWrite:false,blending:THREE.AdditiveBlending,uniforms:{glow:{value:0}},vertexShader:haloVert,fragmentShader:haloFrag}))}
+function geyserFlameMat(core){const m=shGet('gcol'+core,()=>new THREE.ShaderMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,fog:false,uniforms:{time:{value:0},seed:{value:0},alpha:{value:0},core:{value:core}},vertexShader:flameVert,fragmentShader:flameFrag}));m.uniforms.seed.value=rnd()*20;return m}
+/* ---- WARM-UP: build one of everything a hazard can draw, compile + upload it, then recycle it into the pools. Call once at boot, never mid-run. ---- */
+function warmUpHazards(){
+  const holder=new THREE.Group(),held=[];let ci=null,sg=null;
+  try{
+    const add=o=>{o.frustumCulled=false;holder.add(o);return o},mesh=(g,m)=>{add(new THREE.Mesh(g,m));if(m.userData&&m.userData.pk)held.push(m)};
+    mesh(reticleRingGeo,matGet('ov','#ffffff',.5));
+    mesh(blastGeo,matGet('addF','#ffffff',.5));
+    mesh(bmCylGeo,matGet('addD','#ffffff',.5));
+    mesh(wellCoreGeo,matGet('wcore','#07000f',.5));
+    {const lm=matGet('ln','#ffffff',.5);add(new THREE.Line(BOLT_BEAM_GEO,lm));held.push(lm)}
+    bankFill('crack',8,buildCrackGeo);bankFill('bolt0',8,()=>makeBoltGeo(false));bankFill('bolt1',8,()=>makeBoltGeo(true));
+    mesh(_bank.crack[0],geyserCrackMat());mesh(haloGeo,geyserHaloMat());mesh(flameGeo,geyserFlameMat(0));mesh(flameGeo,geyserFlameMat(1));
+    mesh(wellDarkGeo,wellMat(wellDarkFrag,THREE.NormalBlending,true,'wd'));mesh(wellGlowGeo,wellMat(wellGlowFrag,THREE.AdditiveBlending,true,'wg'));
+    mesh(wellDiscGeo,wellMat(wellDiscFrag,THREE.AdditiveBlending,true,'wdisc'));mesh(wellRingGeo,wellMat(wellRingFrag,THREE.AdditiveBlending,true,'wr'));
+    mesh(_bank.bolt0[0].core,matGet('addF','#ffffff',.5));mesh(_bank.bolt1[0].halo,matGet('addF','#ffffff',.5));
+    add(new THREE.Mesh(meteorRockGeos[0],meteorRockMat));add(new THREE.Mesh(meteorFlameGeo,meteorFlameOuterMat));add(new THREE.Mesh(meteorFlameGeo,meteorFlameCoreMat));add(new THREE.Sprite(meteorGlowMat));
+    add(new THREE.Mesh(debrisGeo,sparkMat('#ffb04a')));
+    scene.add(holder);
+    if(renderer.compile)renderer.compile(scene,camera);
+    renderer.render(scene,camera);   /* uploads buffers too; replaced by the normal render just below, in the same task, so it is never shown */
+  }catch(e){console.warn('hazard warm-up skipped:',e)}
+  finally{
+    scene.remove(holder);
+    try{renderer.render(scene,camera)}catch(e){}
+    for(const m of held)matPut(m);
+    if(sg)sg.dispose()
+  }
 }
